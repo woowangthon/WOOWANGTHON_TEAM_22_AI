@@ -23,7 +23,7 @@ def attach_voice_demo(app, base_dir):
     @app.get('/dev/voice/{name}', include_in_schema=False)
     def voice_asset(name: str, request: Request):
         local_only(request)
-        if name not in {'app.js', 'core.mjs', 'illustration.mjs', 'style.css'}:
+        if name not in {'app.js', 'core.mjs', 'illustration.mjs', 'drawing.mjs', 'style.css'}:
             raise HTTPException(404, 'Not Found')
         media = 'text/css' if name.endswith('.css') else 'text/javascript'
         return FileResponse(files / name, media_type=media, headers={'Cache-Control': 'no-store'})

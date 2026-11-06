@@ -1,6 +1,6 @@
 // 그림일기 구성·장면별 생성·실패 재시도·내려받기를 UI와 독립적으로 처리합니다.
 export const isImageDataURL=value=>typeof value==='string'&&/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/.test(value);
-const escapeHTML=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+export const escapeHTML=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 export class IllustratedDiary {
   constructor(request,onChange=()=>{}){this.request=request;this.onChange=onChange;this.state=null;this.busy=false;this.version=0;}
@@ -14,19 +14,21 @@ export class IllustratedDiary {
     }
   }
   clear(){this.cancel();this.state=null;this.onChange(null);}
-  async build(text,pages=2){
+  async build(text,pages=2,format='storybook'){
     if(this.busy)throw new Error('그림을 만들고 있어요. 잠시 기다려 주세요.');
     text=text.trim();
     if(!text||text.length>6000)throw new Error('확인한 일기를 1~6,000자로 입력해 주세요.');
     if(!Number.isInteger(pages)||pages<1||pages>6)throw new Error('그림 수를 1~6장으로 선택해 주세요.');
+    if(!['storybook','comic4'].includes(format))throw new Error('지원하지 않는 그림 형식입니다.');
     const version=++this.version;this.busy=true;
     try{
-      const plan=await this.request('/api/visual-story',{diary_text:text,confirmed:true,format:'storybook',storybook_pages:pages});
+      const plan=await this.request('/api/visual-story',{diary_text:text,confirmed:true,format,storybook_pages:pages});
       if(version!==this.version)return null;
-      if(!plan.storybook?.scenes?.length||!plan.diary_hash)throw new Error('그림일기 장면 구성을 받지 못했습니다.');
-      this.state={diary_text:plan.diary_text,diary_hash:plan.diary_hash,
-        notices:plan.storybook.notices||[],created_at:new Date().toISOString(),
-        scenes:plan.storybook.scenes.map(scene=>({...scene,imageUrl:null,status:'waiting',error:null}))};
+      const document=plan[format];
+      if(!document?.scenes?.length||!plan.diary_hash||(format==='comic4'&&document.scenes.length!==4))throw new Error('그림일기 장면 구성을 받지 못했습니다.');
+      this.state={diary_text:plan.diary_text,diary_hash:plan.diary_hash,format,
+        notices:document.notices||[],created_at:new Date().toISOString(),
+        scenes:document.scenes.map(scene=>({...scene,imageUrl:null,status:'waiting',error:null}))};
       this.onChange(this.state);
       // 무료 한도와 중복 과금을 줄이기 위해 각 장면은 순서대로 한 번만 요청합니다.
       for(let i=0;i<this.state.scenes.length;i++){
@@ -38,11 +40,14 @@ export class IllustratedDiary {
   }
   async generate(index,version){
     const state=this.state,scene=state.scenes[index];
+    if(scene.repeated&&scene.reuse_scene_id){
+      this.reuseScene(scene);this.onChange(state);return;
+    }
     scene.status='generating';scene.error=null;this.onChange(state);
     try{
       const result=await this.request('/api/visual-story/image',{
         diary_text:state.diary_text,diary_hash:state.diary_hash,
-        source_ids:scene.source_ids,format:'storybook',confirmed:true});
+        source_ids:scene.source_ids,format:state.format||'storybook',confirmed:true});
       if(version!==this.version)return;
       if(result.diary_hash!==state.diary_hash||result.caption!==scene.caption||
           JSON.stringify(result.source_ids)!==JSON.stringify(scene.source_ids)){
@@ -56,11 +61,28 @@ export class IllustratedDiary {
           result.status==='mock'?'체험 모드에서는 실제 그림을 만들지 않아요. 실제 AI 모드로 실행해 주세요.':'그림을 받지 못했어요. 키와 무료 한도를 확인해 주세요.');
       }
     }catch(error){if(version===this.version){scene.status='failed';scene.error=error.message;scene.imageUrl=null;}}
-    if(version===this.version)this.onChange(state);
+    if(version===this.version){
+      for(const repeated of state.scenes)if(repeated.reuse_scene_id===scene.scene_id)this.reuseScene(repeated);
+      this.onChange(state);
+    }
+  }
+  reuseScene(scene){
+    const original=this.state.scenes.find(s=>s.scene_id===scene.reuse_scene_id);
+    if(!original||JSON.stringify(original.source_ids)!==JSON.stringify(scene.source_ids)){
+      scene.status='failed';scene.imageUrl=null;scene.error='반복 컷의 근거가 일치하지 않습니다.';return;
+    }
+    scene.imageUrl=original.imageUrl;scene.status=original.status;
+    scene.error=original.error?'원본 컷을 다시 만들면 이 반복 컷도 함께 갱신됩니다.':null;
   }
   async retry(index){
     if(this.busy)throw new Error('현재 그림 생성이 끝난 뒤 다시 시도해 주세요.');
     const scene=this.state?.scenes[index];if(!scene||scene.status==='generated')return;
+    if(scene.repeated&&scene.reuse_scene_id){
+      const original=this.state.scenes.findIndex(s=>s.scene_id===scene.reuse_scene_id);
+      if(original<0)throw new Error('원본 컷을 찾지 못했습니다.');
+      if(this.state.scenes[original].status==='generated'){this.reuseScene(scene);this.onChange(this.state);return;}
+      index=original;
+    }
     const version=++this.version;this.busy=true;
     try{await this.generate(index,version);}finally{if(version===this.version){this.busy=false;this.onChange(this.state);}}
   }

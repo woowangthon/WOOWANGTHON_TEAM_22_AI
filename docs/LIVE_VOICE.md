@@ -9,7 +9,7 @@
 5. 첫 질문을 듣고 답합니다. 말을 마친 뒤 기본 3초 동안 조용하면 자동으로 음성을 인식합니다. 말 끝났어 버튼으로 직접 끝낼 수도 있습니다.
 6. 인식한 글을 확인·수정하고 이 내용으로 보내기를 누릅니다. 다음 질문을 읽은 뒤 자동으로 다시 듣습니다.
 7. 성인 시연에서 자동으로 이어가려면 인식한 글을 확인한 뒤 보내기 체크를 해제합니다. 오인식도 바로 전달되므로 최종 일기를 반드시 확인합니다.
-8. 일시정지 · 마이크 끄기로 녹음을 종료합니다. 대화 마치고 그림일기 만들기로 확인한 발언을 정리합니다.
+8. 일시정지 · 마이크 끄기로 녹음을 종료합니다. 대화 마치고 일기 쓰기로 확인한 발언을 정리합니다.
 
 이 화면은 성인 개발자의 시연용입니다. 실제 아동 대상 운영의 연령·데이터 처리 조건은 별도 확인이 필요합니다.
 
@@ -65,3 +65,5 @@ node --test tests/test_voice_browser.mjs tests/test_voice_ui.mjs
 참고: [Groq STT](https://console.groq.com/docs/speech-to-text), [MediaRecorder](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder), [기기 음성](https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesis).
 
 그림 생성·저장 단계는 [그림일기 안내](ILLUSTRATED_DIARY.md)를 참고하세요.
+
+일기를 확인한 뒤 직접 그림을 그리고, 왼쪽 그림일기와 오른쪽 AI 4컷 만화를 만들 수 있습니다. [현재 그림일기 안내](CHILD_DRAWING_DIARY.md)를 참고하세요.

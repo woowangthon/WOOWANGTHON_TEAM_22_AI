@@ -79,3 +79,27 @@ test('standalone download embeds images, escapes text, and excludes scripts',()=
   assert.ok(!isImageDataURL('data:image/svg+xml;base64,PHN2Zz4='));
   assert.ok(!isImageDataURL('https://example.com/image.png'));
 });
+
+test('four panel comic reuses identical short-story scenes without extra image calls',async()=>{
+  let calls=0;const text='공놀이를 했다.';
+  const scenes=Array.from({length:4},(_,i)=>({scene_id:`comic4-${i+1}`,caption:text,source_ids:[0],repeated:i>0,reuse_scene_id:i>0?'comic4-1':null}));
+  const diary=new IllustratedDiary(async(path,body)=>{
+    if(path==='/api/visual-story'){
+      assert.equal(body.format,'comic4');return {diary_text:text,diary_hash:plan.diary_hash,comic4:{scenes,notices:['반복']}};
+    }
+    calls++;assert.equal(body.format,'comic4');return {...result([0]),caption:text};
+  });
+  await diary.build(text,4,'comic4');
+  assert.equal(calls,1);assert.equal(diary.state.scenes.length,4);
+  assert.ok(diary.state.scenes.every(s=>s.imageUrl===image));
+});
+test('retry of failed repeated comic panel regenerates only its original panel',async()=>{
+  let calls=0;const text='공놀이를 했다.';
+  const scenes=Array.from({length:4},(_,i)=>({scene_id:`comic4-${i+1}`,caption:text,source_ids:[0],repeated:i>0,reuse_scene_id:i>0?'comic4-1':null}));
+  const diary=new IllustratedDiary(async(path)=>{
+    if(path==='/api/visual-story')return {diary_text:text,diary_hash:plan.diary_hash,comic4:{scenes,notices:[]}};
+    if(++calls===1)throw new Error('limit');return {...result([0]),caption:text};
+  });
+  await diary.build(text,4,'comic4');assert.ok(diary.state.scenes.every(s=>s.imageUrl===null));
+  await diary.retry(3);assert.equal(calls,2);assert.ok(diary.state.scenes.every(s=>s.imageUrl===image));
+});

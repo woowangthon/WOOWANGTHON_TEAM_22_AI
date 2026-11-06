@@ -1,5 +1,6 @@
 import {Conversation,TurnDetector} from '/dev/voice/core.mjs';
 import {IllustratedDiary,isImageDataURL} from '/dev/voice/illustration.mjs';
+import {DrawingPad,drawingDiaryHTML} from '/dev/voice/drawing.mjs';
 
 const $=id=>document.getElementById(id);
 const pending=new Set();
@@ -7,6 +8,7 @@ let active=false,phase='idle',revision=0,stream=null,context=null,analyser=null,
 let recorder=null,monitor=null,finishRecording=null,utterance=null,speechTimer=null,finishSpeech=null;
 const MAX_BYTES=8*1024*1024;
 let diaryMessageCount=null;
+let composed=null; // 직접 그린 PNG와 사용자가 확인한 일기. 만화 생성과 별도로 보존합니다.
 
 async function request(path,body){
   const controller=new AbortController();pending.add(controller);
@@ -27,6 +29,7 @@ async function request(path,body){
 }
 const conversation=new Conversation(request);
 const illustrator=new IllustratedDiary(request,renderPictures);
+const drawingPad=new DrawingPad($('drawing-canvas'),drawingChanged,showError);
 
 function setPhase(next,message){
   phase=next;document.body.dataset.phase=next;$('status').textContent=message;
@@ -43,9 +46,14 @@ function setPhase(next,message){
 }
 function syncPictureControls(){
   const busy=['thinking','transcribing','speaking','diary','illustrating','listening'].includes(phase);
-  $('illustrate').disabled=busy||!$('diary-approved').checked||!$('diary-edit').value.trim();
-  $('diary-edit').disabled=busy;$('diary-approved').disabled=busy;$('picture-count').disabled=busy;
-  const ready=illustrator.state?.scenes.some(scene=>scene.status==='generated')&&!illustrator.busy;
+  $('illustrate').disabled=busy||!$('diary-approved').checked||!$('diary-edit').value.trim()||!drawingPad.history.hasDrawing;
+  $('diary-edit').disabled=busy;$('diary-approved').disabled=busy;drawingPad.setDisabled(busy);
+  for(const id of ['draw-color','draw-width','draw-pen','draw-eraser'])$(id).disabled=busy;
+  $('draw-undo').disabled=busy||!drawingPad.history.past.length;
+  $('draw-redo').disabled=busy||!drawingPad.history.future.length;
+  $('draw-clear').disabled=busy||!drawingPad.history.strokes.length;
+  $('make-comic').disabled=busy||!composed;
+  const ready=Boolean(composed)&&!illustrator.busy;
   $('save-picture').disabled=!ready;$('print-picture').disabled=!ready;
 }
 function showError(error){$('error').hidden=false;$('error').textContent=error.message||String(error);}
@@ -59,7 +67,7 @@ function render(){
     item.append(label,content);list.append(item);
   }
   if(diaryMessageCount!==null&&diaryMessageCount!==conversation.messages.length){
-    diaryMessageCount=null;illustrator.clear();$('diary-panel').hidden=true;$('diary-approved').checked=false;
+    diaryMessageCount=null;composed=null;illustrator.clear();$('diary-panel').hidden=true;$('diary-approved').checked=false;
   }
 }
 function disableTracks(){if(stream)for(const track of stream.getTracks())track.enabled=false;}
@@ -217,20 +225,25 @@ async function makeDiary(){
   try{
     const diary=await request('/api/diary',{messages:conversation.messages});if(version!==revision)return;
     $('diary-text').textContent=diary.text;$('diary-note').textContent=diary.fallback?'생성 검사를 통과하지 못해 원문을 유지했습니다.':'말하지 않은 사건이나 감정이 없는지 확인해 주세요.';
-    illustrator.clear();diaryMessageCount=conversation.messages.length;
+    composed=null;illustrator.clear();diaryMessageCount=conversation.messages.length;
     $('diary-edit').value=diary.text;$('diary-approved').checked=false;
-    $('diary-panel').hidden=false;setPhase('done','일기를 확인하고 그림 만들기를 눌러 주세요.');
+    $('diary-panel').hidden=false;setPhase('done','일기를 확인하고 나만의 그림을 그려 주세요.');
+    $('diary-panel').scrollIntoView?.({behavior:'smooth',block:'start'});
   }catch(error){fail(error,version);}
 }
 function renderPictures(state){
-  const cards=$('picture-cards');cards.replaceChildren();$('picture-panel').hidden=!state;
-  if(!state){syncPictureControls();return;}
+  const cards=$('picture-cards');cards.replaceChildren();$('picture-panel').hidden=!composed;
+  if(composed){$('drawing-preview').src=composed.drawing;$('diary-preview').textContent=composed.text;}
+  if(!state){
+    $('picture-progress').textContent='오른쪽 버튼으로 4컷 만화를 만들 수 있어요.';$('picture-notices').textContent='';
+    syncPictureControls();return;
+  }
   const complete=state.scenes.filter(scene=>scene.status==='generated').length;
-  $('picture-progress').textContent=`그림 ${complete} / ${state.scenes.length}장 완료${illustrator.busy?' · 한 장씩 만들고 있어요.':''}`;
+  $('picture-progress').textContent=`만화 ${complete} / 4컷 완료${illustrator.busy?' · 순서대로 만들고 있어요.':''}`;
   $('picture-notices').textContent=state.notices.join(' ');
   state.scenes.forEach((scene,index)=>{
     const card=document.createElement('article');card.className='picture-page';
-    const title=document.createElement('h3');title.textContent=`${index+1}번째 장면`;card.append(title);
+    const title=document.createElement('h3');title.textContent=`${index+1}컷${scene.repeated?' · 같은 장면':''}`;card.append(title);
     if(scene.status==='generated'&&isImageDataURL(scene.imageUrl)){
       const image=document.createElement('img');image.src=scene.imageUrl;image.alt=scene.caption;image.loading='lazy';card.append(image);
     }else{
@@ -238,7 +251,7 @@ function renderPictures(state){
       placeholder.textContent=scene.status==='generating'?'그림을 만들고 원문과 비교하고 있어요…':scene.status==='waiting'?'앞 장면이 끝나면 만들어요.':scene.error||'그림을 만들지 못했어요.';
       card.append(placeholder);
       if(!illustrator.busy){
-        const retry=document.createElement('button');retry.textContent='이 장면만 다시 만들기';
+        const retry=document.createElement('button');retry.textContent=scene.repeated?'원본 컷 다시 만들기':'이 컷만 다시 만들기';
         retry.onclick=()=>retryPicture(index);card.append(retry);
       }
     }
@@ -248,15 +261,32 @@ function renderPictures(state){
 }
 async function createPictures(){
   if(!$('diary-approved').checked){showError(new Error('일기 내용을 먼저 확인해 주세요.'));return;}
-  stop('그림일기를 준비하고 있어요.');const version=revision;clearError();
-  setPhase('illustrating','장면별로 그림을 만들고 있어요. 잠시 기다려 주세요.');
   try{
-    const result=await illustrator.build($('diary-edit').value,Number($('picture-count').value));
+    const text=$('diary-edit').value.trim();
+    if(!text||text.length>6000)throw new Error('일기를 1~6,000자로 확인해 주세요.');
+    const drawing=drawingPad.snapshot();stop('내 그림과 일기를 합치고 있어요.');clearError();
+    composed={text,drawing};
+    if(illustrator.state&&illustrator.state.diary_text!==text)illustrator.clear();
+    renderPictures(illustrator.state);$('diary-panel').hidden=true;
+    setPhase('done','왼쪽 그림일기가 완성됐어요. 오른쪽에서 4컷 만화를 만들 수 있어요.');
+    $('picture-panel').scrollIntoView?.({behavior:'smooth',block:'start'});
+  }catch(error){showError(error);}
+}
+async function makeComic(){
+  if(!composed||illustrator.busy)return;
+  stop('4컷 만화를 준비하고 있어요.');const version=revision;clearError();
+  setPhase('illustrating','확인한 일기로 4컷 만화를 만들고 있어요.');
+  try{
+    const result=await illustrator.build(composed.text,4,'comic4');
     if(version!==revision||!result)return;
     const generated=result.scenes.filter(scene=>scene.status==='generated').length;
-    if(generated===result.scenes.length)$('diary-panel').hidden=true;
-    setPhase('done',generated===result.scenes.length?'그림일기가 준비됐어요. 그림과 글을 확인해 주세요.':'완료된 그림과 글은 유지했어요. 실패한 장면만 다시 만들 수 있어요.');
-  }catch(error){if(version===revision){showError(error);setPhase('done','일기는 남아 있어요. 설정을 확인한 뒤 다시 시도해 주세요.');}}
+    setPhase('done',generated===4?'4컷 만화가 준비됐어요. 그림일기와 함께 확인해 주세요.':'내 그림일기는 그대로 있어요. 실패한 만화 컷만 다시 만들 수 있어요.');
+  }catch(error){if(version===revision){showError(error);setPhase('done','내 그림일기는 남아 있어요. 설정을 확인한 뒤 다시 시도해 주세요.');}}
+}
+function drawingChanged(){
+  composed=null;renderPictures(illustrator.state);
+  $('drawing-note').textContent=drawingPad.history.hasDrawing?'내 그림이 있어요. 일기와 합치거나 더 그릴 수 있어요.':'아직 그림이 없어요. 편하게 그려 보세요.';
+  syncPictureControls();
 }
 async function retryPicture(index){
   if(illustrator.busy)return;const version=revision;clearError();
@@ -272,17 +302,27 @@ $('confirm').onclick=sendDraft;
 $('discard').onclick=async()=>{$('draft').value='';$('draft-panel').hidden=true;if(active)await listen();else setPhase('idle','시작 버튼을 눌러 다시 이야기해 주세요.');};
 $('diary').onclick=makeDiary;
 $('illustrate').onclick=createPictures;
+$('make-comic').onclick=makeComic;
+$('draw-color').oninput=()=>{drawingPad.options.color=$('draw-color').value;selectDrawingTool('pen');};
+$('draw-width').onchange=()=>{drawingPad.options.width=Number($('draw-width').value);};
+function selectDrawingTool(tool){
+  drawingPad.options.tool=tool;
+  $('draw-pen').setAttribute('aria-pressed',String(tool==='pen'));
+  $('draw-eraser').setAttribute('aria-pressed',String(tool==='eraser'));
+}
+$('draw-pen').onclick=()=>selectDrawingTool('pen');$('draw-eraser').onclick=()=>selectDrawingTool('eraser');
+$('draw-undo').onclick=()=>drawingPad.undo();$('draw-redo').onclick=()=>drawingPad.redo();$('draw-clear').onclick=()=>drawingPad.clear();
 $('diary-approved').onchange=syncPictureControls;
 $('diary-edit').oninput=()=>{
-  illustrator.clear();$('diary-approved').checked=false;
-  $('diary-note').textContent='수정한 내용을 다시 확인한 뒤 그림을 만들어 주세요.';syncPictureControls();
+  composed=null;illustrator.clear();$('diary-approved').checked=false;
+  $('diary-note').textContent='수정한 내용을 다시 확인하고 내 그림과 합쳐 주세요.';syncPictureControls();
 };
-$('picture-count').onchange=()=>{illustrator.clear();syncPictureControls();};
 $('show-diary').onclick=()=>{$('diary-panel').hidden=!$('diary-panel').hidden;};
 $('save-picture').onclick=()=>{
   try{
-    const url=URL.createObjectURL(new Blob([illustrator.html()],{type:'text/html;charset=utf-8'}));
-    const link=document.createElement('a');link.href=url;link.download='illustrated-diary.html';link.click();
+    const html=drawingDiaryHTML({...composed,comic:illustrator.state});
+    const url=URL.createObjectURL(new Blob([html],{type:'text/html;charset=utf-8'}));
+    const link=document.createElement('a');link.href=url;link.download='my-diary-and-comic.html';link.click();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   }catch(error){showError(error);}
 };

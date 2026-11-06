@@ -5,14 +5,19 @@ import {readFile} from 'node:fs/promises';
 
 test('microphone turn, transcript confirmation, next question, diary, and cleanup',async()=>{
   const nodes=new Map();
-  function element(){return {disabled:false,hidden:false,checked:true,value:'',textContent:'',children:[],
+  const listeners={};
+  const picture='data:image/png;base64,iVBORw0KGgo=';
+  const ctx={fillRect(){},beginPath(){},arc(){},fill(){},moveTo(){},lineTo(){},stroke(){}};
+  function element(){return {disabled:false,hidden:false,checked:true,value:'',textContent:'',children:[],width:960,height:600,
+    setAttribute(){},getContext:()=>ctx,addEventListener:(name,fn)=>listeners[name]=fn,
+    getBoundingClientRect:()=>({left:0,top:0,width:960,height:600}),setPointerCapture(){},toDataURL:()=>picture,
     append(...items){this.children.push(...items);},replaceChildren(){this.children=[];},click(){}};}
   const get=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id);};
   get('draft-panel').hidden=true;get('silence').value='3000';
   globalThis.document={getElementById:get,createElement:element,body:{dataset:{}},addEventListener(){}};
   globalThis.window=globalThis;globalThis.addEventListener=()=>{};
   let stopped=0,latest,transcriptions=0;const spoken=[],requests=[];
-  const hash='a'.repeat(64),picture='data:image/png;base64,iVBORw0KGgo=';
+  const hash='a'.repeat(64);
   let imageAttempt=0;
   const track={readyState:'live',enabled:false,stop(){stopped++;this.readyState='ended';}};
   Object.defineProperty(globalThis,'navigator',{configurable:true,value:{mediaDevices:{
@@ -37,8 +42,8 @@ test('microphone turn, transcript confirmation, next question, diary, and cleanu
     else if(path==='/api/transcribe'){transcriptions++;body={text:'친구와 공놀이를 했어.',requires_confirmation:true};}
     else if(path==='/api/chat')body={question:JSON.parse(options.body).messages.length?'기분이 어땠어?':'오늘은 무슨 일이 있었어?',finished:false};
     else if(path==='/api/diary')body={text:'친구와 공놀이를 했다.',fallback:false};
-    else if(path==='/api/visual-story')body={diary_text:'친구와 공놀이를 했다.',diary_hash:hash,storybook:{notices:[],scenes:[
-      {scene_id:'storybook-1',order:1,caption:'친구와 공놀이를 했다.',source_ids:[0]}]}};
+    else if(path==='/api/visual-story')body={diary_text:'친구와 공놀이를 했다.',diary_hash:hash,comic4:{notices:[],scenes:
+      Array.from({length:4},(_,i)=>({scene_id:`comic4-${i+1}`,order:i+1,caption:'친구와 공놀이를 했다.',source_ids:[0],repeated:i>0,reuse_scene_id:i>0?'comic4-1':null}))}};
     else if(path==='/api/visual-story/image')body={diary_hash:hash,caption:'친구와 공놀이를 했다.',source_ids:[0],
       status:++imageAttempt===1?'failed':'generated',imageUrl:imageAttempt===1?null:picture,error:null};
     else throw new Error('Unexpected endpoint');
@@ -47,7 +52,8 @@ test('microphone turn, transcript confirmation, next question, diary, and cleanu
   const source=await readFile(new URL('../devtools/voice/app.js',import.meta.url),'utf8');
   const core=new URL('../devtools/voice/core.mjs',import.meta.url).href;
   const illustration=new URL('../devtools/voice/illustration.mjs',import.meta.url).href;
-  await import('data:text/javascript;base64,'+Buffer.from(source.replace('/dev/voice/core.mjs',core).replace('/dev/voice/illustration.mjs',illustration)).toString('base64'));
+  const drawing=new URL('../devtools/voice/drawing.mjs',import.meta.url).href;
+  await import('data:text/javascript;base64,'+Buffer.from(source.replace('/dev/voice/core.mjs',core).replace('/dev/voice/illustration.mjs',illustration).replace('/dev/voice/drawing.mjs',drawing)).toString('base64'));
   await get('start').onclick();
   assert.equal(latest.state,'recording');assert.equal(track.enabled,true);
   assert.deepEqual(spoken,['오늘은 무슨 일이 있었어?']);
@@ -67,13 +73,19 @@ test('microphone turn, transcript confirmation, next question, diary, and cleanu
   assert.equal(get('diary-edit').value,'친구와 공놀이를 했다.');
   assert.equal(get('diary-approved').checked,false);assert.equal(get('illustrate').disabled,true);
   await get('illustrate').onclick();assert.equal(imageAttempt,0); // 일기 확인 전에는 생성하지 않습니다.
-  get('diary-approved').checked=true;get('diary-approved').onchange();get('picture-count').value='2';
+  get('diary-approved').checked=true;get('diary-approved').onchange();
+  await get('illustrate').onclick();assert.equal(imageAttempt,0); // 그림이 없으면 합치지 않습니다.
+  const pointer={clientX:100,clientY:100,pointerId:1,button:0,preventDefault(){}};
+  listeners.pointerdown(pointer);listeners.pointerup({...pointer,clientX:200});
   await get('illustrate').onclick();
-  assert.equal(get('picture-panel').hidden,false);assert.equal(imageAttempt,1);
-  assert.equal(get('save-picture').disabled,true);
-  const retry=get('picture-cards').children[0].children.find(n=>n.textContent==='이 장면만 다시 만들기');
+  assert.equal(get('picture-panel').hidden,false);assert.equal(imageAttempt,0); // 원본 그림 합치기는 무료 로컬 처리입니다.
+  assert.equal(get('drawing-preview').src,picture);assert.equal(get('diary-preview').textContent,'친구와 공놀이를 했다.');
+  assert.equal(get('save-picture').disabled,false);
+  await get('make-comic').onclick();assert.equal(imageAttempt,1);assert.equal(get('picture-cards').children.length,4);
+  const retry=get('picture-cards').children[0].children.find(n=>n.textContent==='이 컷만 다시 만들기');
   assert.ok(retry);await retry.onclick();
   assert.equal(imageAttempt,2);assert.equal(get('save-picture').disabled,false);
+  assert.equal(get('drawing-preview').src,picture); // 만화 재생성이 원본 그림을 바꾸지 않습니다.
   get('diary-edit').value='수정한 일기';get('diary-edit').oninput();
   assert.equal(get('picture-panel').hidden,true);assert.equal(get('diary-approved').checked,false);
 });

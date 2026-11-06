@@ -24,7 +24,7 @@ def test_local_demo_and_assets(monkeypatch,host):
         assert response.status_code==200
         assert response.headers['cache-control']=='no-store'
         assert '마이크로 대화 시작' in response.text
-        for name in ['app.js','core.mjs','illustration.mjs','style.css']:
+        for name in ['app.js','core.mjs','illustration.mjs','drawing.mjs','style.css']:
             asset=client.get('/dev/voice/'+name)
             assert asset.status_code==200
             assert asset.headers['cache-control']=='no-store'

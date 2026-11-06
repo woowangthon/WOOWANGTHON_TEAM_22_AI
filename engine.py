@@ -107,5 +107,7 @@ class DiaryEngine:
             group = sentences[start:start+page_size]
             pages.append({'text':'\n'.join(item['text'] for item in group),
                           'source_ids':sorted({sid for item in group for sid in item['source_ids']}), 'imageUrl':None})
-        return {'text':'\n'.join(item['text'] for item in sentences), 'pages':pages, 'sources':sources,
+        # 검토된 일기는 문장 사이를 자연스럽게 이어 쓰고, 대체 원문은 발언별 줄바꿈을 보존합니다.
+        separator = '\n' if fallback else ' '
+        return {'text':separator.join(item['text'] for item in sentences), 'pages':pages, 'sources':sources,
                 'fallback':fallback, 'requires_confirmation':True, 'mock':self.mock}
