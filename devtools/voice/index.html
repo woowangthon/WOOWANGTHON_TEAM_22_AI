@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>음성 대화 테스트</title>
+  <link rel="stylesheet" href="/dev/voice/style.css">
+  <script type="module" src="/dev/voice/app.js"></script>
+</head>
+<body>
+<main>
+  <header><span class="tag">개발용 · 성인 팀원 테스트</span><a href="/docs">API 문서 ↗</a></header>
+  <h1>말로 하루를 이야기해 보세요</h1>
+  <p class="intro">AI가 한 번에 하나씩 질문해요. 말을 마치면 자동으로 인식하고, 확인한 내용으로 대화를 이어갑니다.</p>
+  <section class="panel controls" aria-label="대화 제어">
+    <div class="status"><span id="light"></span><strong id="status" role="status" aria-live="polite">대화를 시작해 주세요</strong></div>
+    <meter id="level" min="0" max="0.12" value="0" aria-label="마이크 음량"></meter>
+    <div class="buttons">
+      <button id="start" class="primary">마이크로 대화 시작</button>
+      <button id="send-audio" disabled>말 끝났어</button>
+      <button id="resume" disabled>다시 말하기</button>
+      <button id="stop" disabled>일시정지 · 마이크 끄기</button>
+    </div>
+    <div class="options">
+      <label><input id="confirm-first" type="checkbox" checked> 인식한 글을 확인한 뒤 보내기</label>
+      <label><input id="read-aloud" type="checkbox" checked> 기기 음성으로 질문 읽기</label>
+      <label>말 끝 기다리기 <select id="silence"><option value="1800">1.8초</option><option value="3000" selected>3초</option><option value="5000">5초</option></select></label>
+    </div>
+    <p id="voice-note" class="hint">파일 저장·선택 없이 마이크로 대화합니다. 인식과 질문 생성 중에는 잠시 기다려 주세요.</p>
+    <p id="error" role="alert" hidden></p>
+  </section>
+  <section id="draft-panel" class="panel" hidden>
+    <h2>이렇게 말했나요?</h2>
+    <label for="draft">틀린 부분은 고칠 수 있어요.</label>
+    <textarea id="draft" rows="3" maxlength="2000"></textarea>
+    <div class="buttons"><button id="confirm" class="primary">이 내용으로 보내기</button><button id="discard">다시 녹음하기</button></div>
+  </section>
+  <section class="panel" aria-label="대화 내용">
+    <div class="section-heading"><h2>대화</h2><button id="replay" disabled>마지막 질문 다시 듣기</button></div>
+    <ol id="messages" aria-live="polite"><li class="empty">시작 버튼을 누르면 첫 질문을 들려드려요.</li></ol>
+  </section>
+  <div class="buttons bottom"><button id="diary" class="primary" disabled>대화 마치고 그림일기 만들기</button><button id="download" disabled>대화 내려받기</button></div>
+  <section id="diary-panel" class="panel" hidden>
+    <h2>그림을 만들기 전에 일기를 확인해 주세요</h2>
+    <p id="diary-note" class="hint"></p><div id="diary-text" hidden></div>
+    <label for="diary-edit">말하지 않은 사건이나 감정이 있다면 고쳐 주세요.</label>
+    <textarea id="diary-edit" rows="6" maxlength="6000"></textarea>
+    <div class="options"><label>그림 수 <select id="picture-count"><option value="1">최대 1장</option><option value="2" selected>최대 2장</option><option value="3">최대 3장</option><option value="4">최대 4장</option></select></label></div>
+    <label class="approval"><input id="diary-approved" type="checkbox"> 위 내용이 내가 말한 내용과 맞아요.</label>
+    <div class="buttons"><button id="illustrate" class="primary" disabled>확인한 내용으로 그림 만들기</button></div>
+    <p class="hint">그림은 한 장씩 생성하며 시간이 걸릴 수 있어요. 무료 한도가 사용됩니다.</p>
+  </section>
+  <section id="picture-panel" class="panel" hidden>
+    <div class="section-heading"><h2>그림일기</h2><button id="show-diary">일기 글 보기 · 수정</button></div>
+    <p id="picture-progress" role="status" aria-live="polite"></p>
+    <p id="picture-notices" class="hint"></p>
+    <div id="picture-cards"></div>
+    <div class="buttons bottom"><button id="save-picture" disabled>그림일기 파일 저장</button><button id="print-picture" disabled>인쇄 · PDF 저장</button></div>
+    <p class="hint">AI가 그린 그림이 말한 내용과 맞는지 마지막으로 확인해 주세요. 실패한 장면만 다시 만들 수 있어요.</p>
+  </section>
+  <footer>이 화면은 AI 연결 테스트용입니다. 녹음은 발화마다 전송하고, 새로고침하면 화면의 대화는 사라집니다. 날짜별 영구 저장은 BE 연결 후 제공됩니다.</footer>
+</main>
+</body>
+</html>

@@ -95,7 +95,8 @@ def test_api_schema_exposes_generation_only():
     client=TestClient(create_app(DiaryEngine(mock=True)))
     schema=client.get('/openapi.json').json()
     assert set(schema['paths'])=={'/api/status','/api/chat','/api/diary','/api/image',
-                                  '/api/transcribe','/api/speech','/api/voice-chat'}
+                                  '/api/transcribe','/api/speech','/api/voice-chat',
+                                  '/api/visual-story','/api/visual-story/image'}
     assert 'DiaryResponse' in schema['components']['schemas']
     assert 'Source' in schema['components']['schemas']
 

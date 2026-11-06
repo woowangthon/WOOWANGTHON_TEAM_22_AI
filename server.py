@@ -17,6 +17,10 @@ from models import (ConversationRequest, ImageRequest, QuestionResponse,
                     DiaryResponse, ImageResponse, StatusResponse,
                     SpeechRequest, TranscriptionResponse, VoiceReplyResponse)
 from voice import VoiceService, MAX_AUDIO_BYTES, AUDIO_TYPES
+from visual_models import (VisualStoryRequest, VisualStoryResponse,
+                           VisualImageRequest, VisualImageResponse)
+from visual_story import VisualStoryService
+from dev_voice import attach_voice_demo
 
 BASE_DIR = Path(__file__).resolve().parent  # .env를 AI 저장소에서만 읽습니다.
 load_dotenv(BASE_DIR / '.env')
@@ -30,7 +34,8 @@ def create_app(engine=None):
             raise ValueError('AI_MODE는 openai 또는 mock이어야 합니다.')
         engine = DiaryEngine(mock=mode == 'mock')
     voice_service = VoiceService(engine)
-    app = FastAPI(title='AI Service', version='1.1.0')
+    visual_service = VisualStoryService(engine)
+    app = FastAPI(title='AI Service', version='1.2.0')
 
     @app.exception_handler(GenerationError)
     async def generation_error(request, error):
@@ -55,8 +60,11 @@ def create_app(engine=None):
     @app.get('/api/status', response_model=StatusResponse)
     def status():
         # configured는 키 존재 여부이며 실제 키 유효성 검사는 아닙니다.
+        configured = (engine.adapter.configured() if hasattr(engine.adapter, 'configured')
+                      else bool(os.getenv('OPENAI_API_KEY')))
+        # 기존 계약의 openai 값은 실제 호출 모드를 뜻합니다. 공급자는 .env에서 따로 선택합니다.
         return {'mode': 'mock' if engine.mock else 'openai',
-                'configured': engine.mock or bool(os.getenv('OPENAI_API_KEY'))}
+                'configured': engine.mock or configured}
 
     @app.post('/api/chat', response_model=QuestionResponse)
     def chat(body: ConversationRequest):
@@ -112,6 +120,18 @@ def create_app(engine=None):
         return JSONResponse(content=VoiceReplyResponse(**voice_service.reply(body.messages)).model_dump(),
                             headers={'Cache-Control': 'no-store'})
 
+    @app.post('/api/visual-story', response_model=VisualStoryResponse)
+    def visual_story(body: VisualStoryRequest):
+        # 확인한 일기에서 그림책/4컷의 글·근거를 구성합니다. 그림은 다음 API로 생성합니다.
+        return visual_service.plan(body)
+
+    @app.post('/api/visual-story/image', response_model=VisualImageResponse)
+    def visual_image(body: VisualImageRequest):
+        # 장면별로 생성하므로 실패한 컷만 다시 요청할 수 있습니다.
+        return JSONResponse(content=VisualImageResponse(**visual_service.render(body)).model_dump(),
+                            headers={'Cache-Control': 'no-store'})
+
+    attach_voice_demo(app, BASE_DIR)
     return app
 
 

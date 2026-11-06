@@ -9,6 +9,9 @@ from prompts import CHAT_PROMPT, CHAT_REVIEW, DIARY_PROMPT, DIARY_REVIEW, IMAGE_
 class GenerationError(Exception):
     """키 누락·불완전 응답처럼 사용자에게 알려야 하는 오류입니다."""
 
+class ProviderError(GenerationError):
+    """공급자 연결 계층이 만든 공개 가능한 고정 오류 안내입니다."""
+
 class OpenAIAdapter:
     @cached_property
     def client(self):
@@ -50,7 +53,10 @@ class OpenAIAdapter:
 
 class DiaryEngine:
     def __init__(self, adapter=None, mock=False):
-        self.adapter = adapter or OpenAIAdapter()
+        if adapter is None:
+            from providers import ProviderRouter  # 순환 import 없이 기능별 공급자를 구성합니다.
+            adapter = ProviderRouter()
+        self.adapter = adapter
         self.mock = mock  # 실제 AI 없이 백엔드와의 연결만 시험할 때 사용합니다.
 
     def conversation_data(self, messages):
