@@ -42,6 +42,14 @@ def test_supported_diary():
     assert result['pages'][0]['source_ids']==[1,3]
     assert [s['id'] for s in result['sources']]==[1,3]
 
+def test_reviewed_diary_reads_as_paragraph_without_changing_evidence():
+    adapter=FakeAdapter(DiaryCandidate(sentences=[
+        Sentence(text='친구랑 공놀이를 했다.',source_ids=[1]),
+        Sentence(text='재미있었다.',source_ids=[3])]),Review(accepted=True))
+    result=DiaryEngine(adapter).make_diary(conversation())
+    assert result['text']=='친구랑 공놀이를 했다. 재미있었다.'
+    assert result['sources']==[{'id':1,'text':'친구와 공놀이를 했어.'},{'id':3,'text':'즐거웠어.'}]
+
 @pytest.mark.parametrize('ids',[[0],[99],[]])
 def test_invalid_source_falls_back(ids):
     adapter=FakeAdapter(DiaryCandidate(sentences=[Sentence(text='추측한 문장',source_ids=ids)]))
@@ -95,7 +103,8 @@ def test_api_schema_exposes_generation_only():
     client=TestClient(create_app(DiaryEngine(mock=True)))
     schema=client.get('/openapi.json').json()
     assert set(schema['paths'])=={'/api/status','/api/chat','/api/diary','/api/image',
-                                  '/api/transcribe','/api/speech','/api/voice-chat'}
+                                  '/api/transcribe','/api/speech','/api/voice-chat',
+                                  '/api/visual-story','/api/visual-story/image'}
     assert 'DiaryResponse' in schema['components']['schemas']
     assert 'Source' in schema['components']['schemas']
 

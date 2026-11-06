@@ -1,3 +1,5 @@
+> 기능별 공급자 연결과 키 설정: [MULTI_PROVIDER_SETUP.md](MULTI_PROVIDER_SETUP.md). `/api/status`의 `mode=openai`는 기존 실제 호출 모드 이름이며 Groq를 선택해도 유지됩니다. `configured`는 선택한 텍스트 공급자의 키 존재 여부입니다.
+
 # BE → AI 연동 규격 v1.1
 
 기본 개발 주소는 `http://127.0.0.1:8002`입니다. POST 요청은 `Content-Type: application/json`으로 전송합니다. 기존 전체 예제의 `/api/chat`, `/api/diary`, `/api/image` 경로를 유지했습니다. `/question`, `/story`는 제공하지 않습니다.
@@ -5,7 +7,7 @@
 ## 책임 분리
 
 | 동작 | FE | BE | AI |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 대화 시작 | 화면 진입 | 빈 대화로 AI 요청, 응답 보관 | 첫 질문 반환 |
 | 아이 답변 | 입력·전송 | 접근 권한 확인, 순서가 유지된 전체 대화 전달 | 후속 질문 생성 |
 | 일기 버튼 | 버튼 표시·클릭 | 전체 대화로 일기 요청 | 일기·장면 글 생성 및 검사 |
@@ -168,3 +170,9 @@ Content-Type은 JSON이 아닌 multipart/form-data입니다. `file` 하나에 �
 MP3는 base64 문자열이며 data: 접두사나 영구 URL이 없습니다. 디코딩해 Blob/바이트로 처리합니다. 음성 합성에 실패하면 HTTP 200으로 question은 보존하고 audio_base64/audio_mime_type은 null, audio_error는 안내 문자열을 반환합니다. 이 경우 BE는 질문을 보관한 뒤 그 글로 /api/speech만 재시도할 수 있습니다. 질문 생성 자체가 실패하면 기존 502/503 오류를 반환합니다.
 
 mock에서는 고정 질문과 null 오디오, mock 안내 audio_error를 반환합니다. API 키 없이 음성 파일이 만들어진 것처럼 표시하지 않습니다.
+
+## v1.2 추가: 그림책·4컷 만화
+
+`POST /api/visual-story`는 확인한 diary_text, confirmed, format(storybook/comic4/both), storybook_pages를 받아 그림책·4컷의 원문 기반 장면 구성을 반환한다. `POST /api/visual-story/image`는 그 응답의 diary_text, diary_hash, format, source_ids, confirmed로 한 장면의 그림을 생성한다.
+
+이 API의 source_ids는 대화 메시지 위치가 아니라, 확인한 일기를 나눈 원문 조각 번호다. 이미지 생성은 장면별 별도 요청이며 모델 실패 시 HTTP 200/status=failed, 검토 거절 시 status=rejected를 반환한다. 같은 장면 반복은 reuse_scene_id로 재사용한다. FE는 그림책을 페이지로, 만화를 정확히 4칸의 2×2 격자로 표시한다. 상세 입력·응답·오류·변수는 [VISUAL_STORY.md](VISUAL_STORY.md)를 따른다.
