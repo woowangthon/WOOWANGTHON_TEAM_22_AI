@@ -67,3 +67,7 @@ node --test tests/test_voice_browser.mjs tests/test_voice_ui.mjs
 그림 생성·저장 단계는 [그림일기 안내](ILLUSTRATED_DIARY.md)를 참고하세요.
 
 일기를 확인한 뒤 직접 그림을 그리고, 왼쪽 그림일기와 오른쪽 AI 4컷 만화를 만들 수 있습니다. [현재 그림일기 안내](CHILD_DRAWING_DIARY.md)를 참고하세요.
+
+### 음성 말투
+
+대화는 짧고 다정한 구어체를 사용합니다. 서버 TTS(`/api/speech`, `/api/voice-chat`)의 말하기 지침은 `prompts.py`의 `TTS_INSTRUCTIONS`에서 관리하며, 따뜻한 어조·자연스러운 문장 연결·짧은 쉼을 요청합니다. 입력 문장은 그대로 읽습니다. 데모의 기기 음성에는 서버 TTS의 억양 지침이 적용되지 않습니다. 실제 자연스러움은 사용하는 음성으로 들어 보며 확인해야 합니다.

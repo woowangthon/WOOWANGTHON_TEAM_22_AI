@@ -1,5 +1,7 @@
 """음성 인식(STT)과 음성 합성(TTS). 마이크 장치 제어는 FE에서 담당합니다."""
 import base64
+
+from prompts import TTS_INSTRUCTIONS
 import os
 
 from openai import OpenAIError
@@ -61,7 +63,7 @@ class VoiceService:
             voice=os.getenv('TTS_VOICE', 'coral'),
             input=text,
             response_format='mp3',
-            instructions='주어진 한국어 문장만 차분하고 또렷하게 읽어 주세요. 단어나 감탄사를 추가하지 마세요.',
+            instructions=TTS_INSTRUCTIONS,
         ) as response:
             audio_bytes = response.read()
         if not audio_bytes:

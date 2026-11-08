@@ -1,5 +1,7 @@
 """기능별 공급자 연결. 비밀 키와 공급자의 원본 오류는 응답에 포함하지 않습니다."""
 import base64
+
+from prompts import TTS_INSTRUCTIONS
 import binascii
 import json
 import os
@@ -134,7 +136,7 @@ class ProviderRouter:
             with self.openai.audio.speech.with_streaming_response.create(
                 model=setting('OPENAI_TTS_MODEL', setting('TTS_MODEL', 'gpt-4o-mini-tts')),
                 voice=setting('TTS_VOICE', 'coral'), input=text, response_format='mp3',
-                instructions='주어진 한국어 문장만 차분하고 또렷하게 읽어 주세요. 말을 추가하지 마세요.',
+                instructions=TTS_INSTRUCTIONS,
             ) as response:
                 return response.read()
         except OpenAIError as error:
