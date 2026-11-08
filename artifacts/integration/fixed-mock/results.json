@@ -1,0 +1,94 @@
+{
+  "timestamp": "2026-11-08T05:57:07.064786+00:00",
+  "mode": "mock",
+  "branch": "main",
+  "head": "94c3e20f4b4682d6b2981c9152fb6dd5e1aa16ea",
+  "settings": {
+    "TEXT_PROVIDER": "groq",
+    "GROQ_TEXT_MODEL": "openai/gpt-oss-20b",
+    "IMAGE_PROVIDER": "cloudflare",
+    "CLOUDFLARE_IMAGE_MODEL": "@cf/black-forest-labs/flux-1-schnell",
+    "VISION_PROVIDER": "groq",
+    "GROQ_VISION_MODEL": "qwen/qwen3.8-27b"
+  },
+  "calls": [
+    {
+      "name": "explicit_finish",
+      "path": "/api/chat",
+      "request": {
+        "messages": [
+          {
+            "role": "child",
+            "text": "이제 그만할래. 일기로 만들어 줘."
+          }
+        ]
+      },
+      "http_status": 200,
+      "seconds": 0.002,
+      "response": {
+        "question": "알겠어. 하단 버튼으로 일기를 확인해 줘.",
+        "finished": true,
+        "mock": true,
+        "fallback": false
+      }
+    },
+    {
+      "name": "simple_diary",
+      "path": "/api/diary",
+      "request": {
+        "messages": [
+          {
+            "role": "assistant",
+            "text": "오늘 무슨 일이 있었어?"
+          },
+          {
+            "role": "child",
+            "text": "집에서 파란 블록을 쌓았어."
+          },
+          {
+            "role": "assistant",
+            "text": "어떤 기분이 들었어?"
+          },
+          {
+            "role": "child",
+            "text": "재미있었어."
+          }
+        ]
+      },
+      "http_status": 200,
+      "seconds": 0.001,
+      "response": {
+        "text": "집에서 파란 블록을 쌓았어.\n재미있었어.",
+        "pages": [
+          {
+            "text": "집에서 파란 블록을 쌓았어.",
+            "source_ids": [
+              1
+            ],
+            "imageUrl": null
+          },
+          {
+            "text": "재미있었어.",
+            "source_ids": [
+              3
+            ],
+            "imageUrl": null
+          }
+        ],
+        "sources": [
+          {
+            "id": 1,
+            "text": "집에서 파란 블록을 쌓았어."
+          },
+          {
+            "id": 3,
+            "text": "재미있었어."
+          }
+        ],
+        "fallback": true,
+        "requires_confirmation": true,
+        "mock": true
+      }
+    }
+  ]
+}

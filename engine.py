@@ -1,6 +1,7 @@
 """[3] 대화와 일기 생성 로직. API 키를 프런트엔드에 전달하지 않습니다."""
 import json
 import os
+import re
 from functools import cached_property
 from openai import OpenAI
 from models import QuestionCandidate, DiaryCandidate, Review
@@ -70,6 +71,15 @@ class DiaryEngine:
         child_messages = [item for item in conversation if item['role']=='child']
         if not child_messages:
             return {'question':'오늘은 무슨 일이 있었어?', 'finished':False, 'mock':self.mock}
+        # 명확한 종료 의사는 생성/검토의 거절이나 공급자 한도로 뒤집지 않습니다.
+        # 전체 문장 일치만 허용하여 부정·인용·과거 사건을 종료로 오인하지 않습니다.
+        last_child = child_messages[-1]['text'].strip()
+        if re.fullmatch(
+            r'(?:이제\s*)?(?:그만할래|그만하고 싶어|끝낼래|끝내고 싶어)'
+            r'[.!。]?\s*(?:일기로\s*만들어\s*줘[.!。]?)?', last_child
+        ):
+            return {'question': '알겠어. 하단 버튼으로 일기를 확인해 줘.',
+                    'finished': True, 'mock': self.mock, 'fallback': False}
         if self.mock:
             # 이 분기는 정해진 질문만 반환합니다. 실제 꼬리 질문은 아래 모델 호출에서 생성합니다.
             examples = ['그때 어떤 일이 있었는지 더 들려줄래?', '그때 어떤 기분이 들었어?', '더 남기고 싶은 이야기가 있어?']

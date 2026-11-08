@@ -1,0 +1,37 @@
+{
+  "timestamp": "2026-11-08T05:54:13.539498+00:00",
+  "mode": "live",
+  "branch": "main",
+  "head": "94c3e20f4b4682d6b2981c9152fb6dd5e1aa16ea",
+  "settings": {
+    "TEXT_PROVIDER": "groq",
+    "GROQ_TEXT_MODEL": "openai/gpt-oss-20b",
+    "IMAGE_PROVIDER": "cloudflare",
+    "CLOUDFLARE_IMAGE_MODEL": "@cf/black-forest-labs/flux-1-schnell",
+    "VISION_PROVIDER": "groq",
+    "GROQ_VISION_MODEL": "qwen/qwen3.8-27b"
+  },
+  "calls": [
+    {
+      "name": "followup",
+      "path": "/api/chat",
+      "request": {
+        "messages": [
+          {
+            "role": "assistant",
+            "text": "오늘 무슨 일이 있었어?"
+          },
+          {
+            "role": "child",
+            "text": "친구랑 공원에서 공놀이 했어."
+          }
+        ]
+      },
+      "http_status": 503,
+      "seconds": 0.049,
+      "response": {
+        "error": "groq: 연결에 실패했습니다. 네트워크와 제공업체 상태를 확인해 주세요."
+      }
+    }
+  ]
+}

@@ -1,0 +1,568 @@
+{
+  "timestamp": "2026-11-08T05:53:39.964580+00:00",
+  "mode": "live",
+  "branch": "main",
+  "head": "94c3e20f4b4682d6b2981c9152fb6dd5e1aa16ea",
+  "settings": {
+    "TEXT_PROVIDER": "groq",
+    "GROQ_TEXT_MODEL": "openai/gpt-oss-20b",
+    "IMAGE_PROVIDER": "cloudflare",
+    "CLOUDFLARE_IMAGE_MODEL": "@cf/black-forest-labs/flux-1-schnell",
+    "VISION_PROVIDER": "groq",
+    "GROQ_VISION_MODEL": "qwen/qwen3.8-27b"
+  },
+  "calls": [
+    {
+      "name": "followup",
+      "path": "/api/chat",
+      "request": {
+        "messages": [
+          {
+            "role": "assistant",
+            "text": "오늘 무슨 일이 있었어?"
+          },
+          {
+            "role": "child",
+            "text": "친구랑 공원에서 공놀이 했어."
+          }
+        ]
+      },
+      "http_status": 200,
+      "seconds": 1.575,
+      "response": {
+        "question": "공놀이에서 어떤 게임을 했어?",
+        "finished": false,
+        "mock": false,
+        "fallback": false
+      }
+    },
+    {
+      "name": "short",
+      "path": "/api/chat",
+      "request": {
+        "messages": [
+          {
+            "role": "assistant",
+            "text": "오늘 무슨 일이 있었어?"
+          },
+          {
+            "role": "child",
+            "text": "친구랑 공원에서 공놀이 했어."
+          },
+          {
+            "role": "assistant",
+            "text": "공놀이에서 어떤 게임을 했어?"
+          },
+          {
+            "role": "child",
+            "text": "응"
+          }
+        ]
+      },
+      "http_status": 200,
+      "seconds": 2.254,
+      "response": {
+        "question": "더 들려주고 싶은 이야기가 있어?",
+        "finished": false,
+        "mock": false,
+        "fallback": true
+      }
+    },
+    {
+      "name": "correction",
+      "path": "/api/chat",
+      "request": {
+        "messages": [
+          {
+            "role": "assistant",
+            "text": "오늘 무슨 일이 있었어?"
+          },
+          {
+            "role": "child",
+            "text": "친구랑 공원에서 공놀이 했어."
+          },
+          {
+            "role": "assistant",
+            "text": "공놀이에서 어떤 게임을 했어?"
+          },
+          {
+            "role": "child",
+            "text": "응"
+          },
+          {
+            "role": "assistant",
+            "text": "더 들려주고 싶은 이야기가 있어?"
+          },
+          {
+            "role": "child",
+            "text": "아니, 공원이 아니라 집이었어. 공놀이는 안 했고 블록을 쌓았어."
+          }
+        ]
+      },
+      "http_status": 200,
+      "seconds": 1.724,
+      "response": {
+        "question": "블록을 쌓았을 때 색깔이 어떤 것이 많았어?",
+        "finished": false,
+        "mock": false,
+        "fallback": false
+      }
+    },
+    {
+      "name": "refusal",
+      "path": "/api/chat",
+      "request": {
+        "messages": [
+          {
+            "role": "assistant",
+            "text": "오늘 무슨 일이 있었어?"
+          },
+          {
+            "role": "child",
+            "text": "친구랑 공원에서 공놀이 했어."
+          },
+          {
+            "role": "assistant",
+            "text": "공놀이에서 어떤 게임을 했어?"
+          },
+          {
+            "role": "child",
+            "text": "응"
+          },
+          {
+            "role": "assistant",
+            "text": "더 들려주고 싶은 이야기가 있어?"
+          },
+          {
+            "role": "child",
+            "text": "아니, 공원이 아니라 집이었어. 공놀이는 안 했고 블록을 쌓았어."
+          },
+          {
+            "role": "assistant",
+            "text": "블록을 쌓았을 때 색깔이 어떤 것이 많았어?"
+          },
+          {
+            "role": "child",
+            "text": "기분은 말하기 싫어."
+          }
+        ]
+      },
+      "http_status": 200,
+      "seconds": 2.171,
+      "response": {
+        "question": "블록으로 뭐 만들었어?",
+        "finished": false,
+        "mock": false,
+        "fallback": false
+      }
+    },
+    {
+      "name": "finish",
+      "path": "/api/chat",
+      "request": {
+        "messages": [
+          {
+            "role": "assistant",
+            "text": "오늘 무슨 일이 있었어?"
+          },
+          {
+            "role": "child",
+            "text": "친구랑 공원에서 공놀이 했어."
+          },
+          {
+            "role": "assistant",
+            "text": "공놀이에서 어떤 게임을 했어?"
+          },
+          {
+            "role": "child",
+            "text": "응"
+          },
+          {
+            "role": "assistant",
+            "text": "더 들려주고 싶은 이야기가 있어?"
+          },
+          {
+            "role": "child",
+            "text": "아니, 공원이 아니라 집이었어. 공놀이는 안 했고 블록을 쌓았어."
+          },
+          {
+            "role": "assistant",
+            "text": "블록을 쌓았을 때 색깔이 어떤 것이 많았어?"
+          },
+          {
+            "role": "child",
+            "text": "기분은 말하기 싫어."
+          },
+          {
+            "role": "assistant",
+            "text": "블록으로 뭐 만들었어?"
+          },
+          {
+            "role": "child",
+            "text": "이제 그만할래. 일기로 만들어 줘."
+          }
+        ]
+      },
+      "http_status": 503,
+      "seconds": 0.153,
+      "response": {
+        "error": "groq: 무료 호출·토큰·음성 한도에 도달했습니다. 잠시 후 한도를 확인하고 재시도해 주세요."
+      }
+    },
+    {
+      "name": "diary",
+      "path": "/api/diary",
+      "request": {
+        "messages": [
+          {
+            "role": "assistant",
+            "text": "오늘 무슨 일이 있었어?"
+          },
+          {
+            "role": "child",
+            "text": "친구랑 공원에서 공놀이 했어."
+          },
+          {
+            "role": "assistant",
+            "text": "공놀이에서 어떤 게임을 했어?"
+          },
+          {
+            "role": "child",
+            "text": "응"
+          },
+          {
+            "role": "assistant",
+            "text": "더 들려주고 싶은 이야기가 있어?"
+          },
+          {
+            "role": "child",
+            "text": "아니, 공원이 아니라 집이었어. 공놀이는 안 했고 블록을 쌓았어."
+          },
+          {
+            "role": "assistant",
+            "text": "블록을 쌓았을 때 색깔이 어떤 것이 많았어?"
+          },
+          {
+            "role": "child",
+            "text": "기분은 말하기 싫어."
+          },
+          {
+            "role": "assistant",
+            "text": "블록으로 뭐 만들었어?"
+          },
+          {
+            "role": "child",
+            "text": "이제 그만할래. 일기로 만들어 줘."
+          }
+        ]
+      },
+      "http_status": 503,
+      "seconds": 0.152,
+      "response": {
+        "error": "groq: 무료 호출·토큰·음성 한도에 도달했습니다. 잠시 후 한도를 확인하고 재시도해 주세요."
+      }
+    },
+    {
+      "name": "plan",
+      "path": "/api/visual-story",
+      "request": {
+        "diary_text": "빨간 공을 굴렸다. 파란 블록을 쌓았다. 종이에 동그라미를 그렸다. 책을 펼쳤다. 책을 덮었다.",
+        "format": "comic4",
+        "confirmed": true
+      },
+      "http_status": 200,
+      "seconds": 0.725,
+      "response": {
+        "diary_text": "빨간 공을 굴렸다. 파란 블록을 쌓았다. 종이에 동그라미를 그렸다. 책을 펼쳤다. 책을 덮었다.",
+        "diary_hash": "8884860bb3c860bb186995f5919514141f10b6cd7b4e72027573b79bf56079b9",
+        "sources": [
+          {
+            "id": 0,
+            "text": "빨간 공을 굴렸다."
+          },
+          {
+            "id": 1,
+            "text": "파란 블록을 쌓았다."
+          },
+          {
+            "id": 2,
+            "text": "종이에 동그라미를 그렸다."
+          },
+          {
+            "id": 3,
+            "text": "책을 펼쳤다."
+          },
+          {
+            "id": 4,
+            "text": "책을 덮었다."
+          }
+        ],
+        "storybook": null,
+        "comic4": {
+          "format": "comic4",
+          "layout": "grid_2x2",
+          "planning_mode": "model",
+          "scenes": [
+            {
+              "scene_id": "comic4-1",
+              "order": 1,
+              "caption": "빨간 공을 굴렸다.",
+              "source_ids": [
+                0
+              ],
+              "imageUrl": null,
+              "repeated": false,
+              "reuse_scene_id": null
+            },
+            {
+              "scene_id": "comic4-2",
+              "order": 2,
+              "caption": "파란 블록을 쌓았다.",
+              "source_ids": [
+                1
+              ],
+              "imageUrl": null,
+              "repeated": false,
+              "reuse_scene_id": null
+            },
+            {
+              "scene_id": "comic4-3",
+              "order": 3,
+              "caption": "종이에 동그라미를 그렸다.",
+              "source_ids": [
+                2
+              ],
+              "imageUrl": null,
+              "repeated": false,
+              "reuse_scene_id": null
+            },
+            {
+              "scene_id": "comic4-4",
+              "order": 4,
+              "caption": "책을 펼쳤다.\n책을 덮었다.",
+              "source_ids": [
+                3,
+                4
+              ],
+              "imageUrl": null,
+              "repeated": false,
+              "reuse_scene_id": null
+            }
+          ],
+          "notices": []
+        },
+        "requires_confirmation": true,
+        "mock": false
+      }
+    },
+    {
+      "name": "short_plan",
+      "path": "/api/visual-story",
+      "request": {
+        "diary_text": "블록을 쌓았다.",
+        "format": "comic4",
+        "confirmed": true
+      },
+      "http_status": 200,
+      "seconds": 0.001,
+      "response": {
+        "diary_text": "블록을 쌓았다.",
+        "diary_hash": "f18e913440ed54768f9d55a8e01cf4970a12082ae14bd89847bef9292283d1a1",
+        "sources": [
+          {
+            "id": 0,
+            "text": "블록을 쌓았다."
+          }
+        ],
+        "storybook": null,
+        "comic4": {
+          "format": "comic4",
+          "layout": "grid_2x2",
+          "planning_mode": "deterministic",
+          "scenes": [
+            {
+              "scene_id": "comic4-1",
+              "order": 1,
+              "caption": "블록을 쌓았다.",
+              "source_ids": [
+                0
+              ],
+              "imageUrl": null,
+              "repeated": false,
+              "reuse_scene_id": null
+            },
+            {
+              "scene_id": "comic4-2",
+              "order": 2,
+              "caption": "블록을 쌓았다.",
+              "source_ids": [
+                0
+              ],
+              "imageUrl": null,
+              "repeated": true,
+              "reuse_scene_id": "comic4-1"
+            },
+            {
+              "scene_id": "comic4-3",
+              "order": 3,
+              "caption": "블록을 쌓았다.",
+              "source_ids": [
+                0
+              ],
+              "imageUrl": null,
+              "repeated": true,
+              "reuse_scene_id": "comic4-1"
+            },
+            {
+              "scene_id": "comic4-4",
+              "order": 4,
+              "caption": "블록을 쌓았다.",
+              "source_ids": [
+                0
+              ],
+              "imageUrl": null,
+              "repeated": true,
+              "reuse_scene_id": "comic4-1"
+            }
+          ],
+          "notices": [
+            "원문이 짧아 같은 장면을 반복했습니다. 반복 컷은 새로운 사건이나 시간 경과를 뜻하지 않습니다."
+          ]
+        },
+        "requires_confirmation": true,
+        "mock": false
+      }
+    },
+    {
+      "name": "comic4-1",
+      "path": "/api/visual-story/image",
+      "request": {
+        "diary_text": "빨간 공을 굴렸다. 파란 블록을 쌓았다. 종이에 동그라미를 그렸다. 책을 펼쳤다. 책을 덮었다.",
+        "diary_hash": "8884860bb3c860bb186995f5919514141f10b6cd7b4e72027573b79bf56079b9",
+        "source_ids": [
+          0
+        ],
+        "format": "comic4",
+        "confirmed": true
+      },
+      "http_status": 200,
+      "seconds": 0.145,
+      "response": {
+        "diary_hash": "8884860bb3c860bb186995f5919514141f10b6cd7b4e72027573b79bf56079b9",
+        "scene_key": "ab9f9aa3a11a8b0fad0c8948d30760570f705b7d15bcbb0408ad43ea3d08f4c0",
+        "caption": "빨간 공을 굴렸다.",
+        "source_ids": [
+          0
+        ],
+        "format": "comic4",
+        "imageUrl": null,
+        "status": "failed",
+        "error": "groq: 무료 호출·토큰·음성 한도에 도달했습니다. 잠시 후 한도를 확인하고 재시도해 주세요.",
+        "requires_confirmation": true,
+        "mock": false
+      }
+    },
+    {
+      "name": "comic4-2",
+      "path": "/api/visual-story/image",
+      "request": {
+        "diary_text": "빨간 공을 굴렸다. 파란 블록을 쌓았다. 종이에 동그라미를 그렸다. 책을 펼쳤다. 책을 덮었다.",
+        "diary_hash": "8884860bb3c860bb186995f5919514141f10b6cd7b4e72027573b79bf56079b9",
+        "source_ids": [
+          1
+        ],
+        "format": "comic4",
+        "confirmed": true
+      },
+      "http_status": 200,
+      "seconds": 0.16,
+      "response": {
+        "diary_hash": "8884860bb3c860bb186995f5919514141f10b6cd7b4e72027573b79bf56079b9",
+        "scene_key": "79b04f5bb3bb5f81c2094ef58f47d125c81f45d7766dbda0f4d2c16918e9aaa7",
+        "caption": "파란 블록을 쌓았다.",
+        "source_ids": [
+          1
+        ],
+        "format": "comic4",
+        "imageUrl": null,
+        "status": "failed",
+        "error": "groq: 무료 호출·토큰·음성 한도에 도달했습니다. 잠시 후 한도를 확인하고 재시도해 주세요.",
+        "requires_confirmation": true,
+        "mock": false
+      }
+    },
+    {
+      "name": "comic4-3",
+      "path": "/api/visual-story/image",
+      "request": {
+        "diary_text": "빨간 공을 굴렸다. 파란 블록을 쌓았다. 종이에 동그라미를 그렸다. 책을 펼쳤다. 책을 덮었다.",
+        "diary_hash": "8884860bb3c860bb186995f5919514141f10b6cd7b4e72027573b79bf56079b9",
+        "source_ids": [
+          2
+        ],
+        "format": "comic4",
+        "confirmed": true
+      },
+      "http_status": 200,
+      "seconds": 0.145,
+      "response": {
+        "diary_hash": "8884860bb3c860bb186995f5919514141f10b6cd7b4e72027573b79bf56079b9",
+        "scene_key": "28037b9364092752f5229caa0ec3a9163bb6ffb12f7f4abc1e38138a96c3d3f1",
+        "caption": "종이에 동그라미를 그렸다.",
+        "source_ids": [
+          2
+        ],
+        "format": "comic4",
+        "imageUrl": null,
+        "status": "failed",
+        "error": "groq: 무료 호출·토큰·음성 한도에 도달했습니다. 잠시 후 한도를 확인하고 재시도해 주세요.",
+        "requires_confirmation": true,
+        "mock": false
+      }
+    },
+    {
+      "name": "comic4-4",
+      "path": "/api/visual-story/image",
+      "request": {
+        "diary_text": "빨간 공을 굴렸다. 파란 블록을 쌓았다. 종이에 동그라미를 그렸다. 책을 펼쳤다. 책을 덮었다.",
+        "diary_hash": "8884860bb3c860bb186995f5919514141f10b6cd7b4e72027573b79bf56079b9",
+        "source_ids": [
+          3,
+          4
+        ],
+        "format": "comic4",
+        "confirmed": true
+      },
+      "http_status": 200,
+      "seconds": 0.187,
+      "response": {
+        "diary_hash": "8884860bb3c860bb186995f5919514141f10b6cd7b4e72027573b79bf56079b9",
+        "scene_key": "a854a475571ce18d1eabda36b89f3dccf3d38aaaa91c750a38dc03f5e661d4f4",
+        "caption": "책을 펼쳤다.\n책을 덮었다.",
+        "source_ids": [
+          3,
+          4
+        ],
+        "format": "comic4",
+        "imageUrl": null,
+        "status": "failed",
+        "error": "groq: 무료 호출·토큰·음성 한도에 도달했습니다. 잠시 후 한도를 확인하고 재시도해 주세요.",
+        "requires_confirmation": true,
+        "mock": false
+      }
+    },
+    {
+      "name": "legacy_image",
+      "path": "/api/image",
+      "request": {
+        "text": "빨간 공을 굴렸다.",
+        "confirmed": true
+      },
+      "http_status": 503,
+      "seconds": 0.181,
+      "response": {
+        "error": "groq: 무료 호출·토큰·음성 한도에 도달했습니다. 잠시 후 한도를 확인하고 재시도해 주세요."
+      }
+    }
+  ]
+}
