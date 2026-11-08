@@ -1,0 +1,67 @@
+{
+  "diary_text": "블록을 쌓았다.",
+  "diary_hash": "f18e913440ed54768f9d55a8e01cf4970a12082ae14bd89847bef9292283d1a1",
+  "sources": [
+    {
+      "id": 0,
+      "text": "블록을 쌓았다."
+    }
+  ],
+  "storybook": null,
+  "comic4": {
+    "format": "comic4",
+    "layout": "grid_2x2",
+    "planning_mode": "deterministic",
+    "scenes": [
+      {
+        "scene_id": "comic4-1",
+        "order": 1,
+        "caption": "블록을 쌓았다.",
+        "source_ids": [
+          0
+        ],
+        "imageUrl": null,
+        "repeated": false,
+        "reuse_scene_id": null
+      },
+      {
+        "scene_id": "comic4-2",
+        "order": 2,
+        "caption": "블록을 쌓았다.",
+        "source_ids": [
+          0
+        ],
+        "imageUrl": null,
+        "repeated": true,
+        "reuse_scene_id": "comic4-1"
+      },
+      {
+        "scene_id": "comic4-3",
+        "order": 3,
+        "caption": "블록을 쌓았다.",
+        "source_ids": [
+          0
+        ],
+        "imageUrl": null,
+        "repeated": true,
+        "reuse_scene_id": "comic4-1"
+      },
+      {
+        "scene_id": "comic4-4",
+        "order": 4,
+        "caption": "블록을 쌓았다.",
+        "source_ids": [
+          0
+        ],
+        "imageUrl": null,
+        "repeated": true,
+        "reuse_scene_id": "comic4-1"
+      }
+    ],
+    "notices": [
+      "원문이 짧아 같은 장면을 반복했습니다. 반복 컷은 새로운 사건이나 시간 경과를 뜻하지 않습니다."
+    ]
+  },
+  "requires_confirmation": true,
+  "mock": false
+}

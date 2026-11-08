@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from openai import OpenAI
 
+from image_fixture import encoded_image
 from engine import DiaryEngine, GenerationError
 from server import create_app
 from visual_models import ScenePlan, SceneGroup
@@ -152,7 +153,7 @@ def test_real_sdk_request_shapes_with_fake_network(monkeypatch,accepted,status):
     def handler(request):
         body=json.loads(request.read());calls.append((request.url.path,body))
         if request.url.path.endswith('/images/generations'):
-            return httpx.Response(200,json={'created':0,'data':[{'b64_json':'test-base64'}]})
+            return httpx.Response(200,json={'created':0,'data':[{'b64_json':encoded_image()}]})
         return httpx.Response(200,json={
             'id':'resp_test','object':'response','created_at':0,'model':'gpt-4.1-mini',
             'status':'completed','output':[{'id':'msg_test','type':'message','role':'assistant','status':'completed',

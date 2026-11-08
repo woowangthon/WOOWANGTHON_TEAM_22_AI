@@ -1,0 +1,32 @@
+{
+  "text": "집에서 파란 블록을 쌓았다. 재미있었다.",
+  "pages": [
+    {
+      "text": "집에서 파란 블록을 쌓았다.",
+      "source_ids": [
+        1
+      ],
+      "imageUrl": null
+    },
+    {
+      "text": "재미있었다.",
+      "source_ids": [
+        3
+      ],
+      "imageUrl": null
+    }
+  ],
+  "sources": [
+    {
+      "id": 1,
+      "text": "집에서 파란 블록을 쌓았어."
+    },
+    {
+      "id": 3,
+      "text": "재미있었어."
+    }
+  ],
+  "fallback": false,
+  "requires_confirmation": true,
+  "mock": false
+}

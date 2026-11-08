@@ -1,0 +1,28 @@
+{
+  "messages": [
+    {
+      "role": "assistant",
+      "text": "오늘 무슨 일이 있었어?"
+    },
+    {
+      "role": "child",
+      "text": "친구랑 공원에서 공놀이 했어."
+    },
+    {
+      "role": "assistant",
+      "text": "공놀이를 할 때 어떤 공을 썼어?"
+    },
+    {
+      "role": "child",
+      "text": "응"
+    },
+    {
+      "role": "assistant",
+      "text": "친구의 이름이 뭐야?"
+    },
+    {
+      "role": "child",
+      "text": "아니, 공원이 아니라 집이었어. 공놀이는 안 했고 블록을 쌓았어."
+    }
+  ]
+}

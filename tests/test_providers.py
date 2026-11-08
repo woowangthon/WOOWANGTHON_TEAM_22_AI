@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from openai import OpenAI
 
+from image_fixture import encoded_image
 from engine import DiaryEngine, GenerationError
 from models import Review
 from providers import ProviderRouter
@@ -110,7 +111,7 @@ def test_status_uses_text_provider_key(router,monkeypatch):
 @pytest.mark.parametrize('accepted',[True,False])
 def test_cloudflare_image_then_groq_vision(router,monkeypatch,accepted):
     calls=[]
-    jpeg=base64.b64encode(b'\xff\xd8\xff-test-jpeg').decode()
+    jpeg=encoded_image('JPEG')
     def groq_handler(request):
         body=json.loads(request.read());calls.append(body)
         if len(calls)==1:
@@ -168,7 +169,7 @@ def test_cloudflare_invalid_image_is_not_returned(router,monkeypatch):
     monkeypatch.setattr('providers.HTTPClient',lambda **kw:original_client(
         **kw,transport=httpx.MockTransport(lambda req:httpx.Response(200,json={
             'success':True,'result':{'image':base64.b64encode(b'not an image').decode()}}))))
-    with pytest.raises(GenerationError,match='이미지 형식'):
+    with pytest.raises(GenerationError,match='응답 형식'):
         router._cloudflare_image('test')
 
 
@@ -183,3 +184,60 @@ def test_openai_opt_in_sends_only_openai_key(router,monkeypatch):
         http_client=httpx.Client(transport=httpx.MockTransport(handler)))
     try:assert live.speech('안녕?')==b'ID3-test'
     finally:live.openai.close()
+
+
+@pytest.mark.parametrize('finish', ['length', 'content_filter'])
+def test_incomplete_vision_is_failed_not_rejected(router, monkeypatch, finish):
+    bind_groq(router, lambda request: httpx.Response(200, json=completion({'accepted': False}, finish)))
+    monkeypatch.setattr(router, 'generate_reviewed_image', lambda *args: (
+        'data:image/png;base64,' + encoded_image()
+        if router._review_image('data:image/png;base64,' + encoded_image(), 'review', {}) else None))
+    try:
+        with TestClient(create_app(DiaryEngine(router))) as client:
+            result = client.post('/api/visual-story/image', json={
+                'diary_text': '블록을 쌓았다.', 'diary_hash': text_hash('블록을 쌓았다.'),
+                'source_ids': [0], 'format': 'comic4', 'confirmed': True}).json()
+        assert result['status'] == 'failed'
+        assert result['imageUrl'] is None
+        assert result['error']
+    finally:
+        router.groq.close()
+
+
+@pytest.mark.parametrize('raw', [b'\xff\xd8\xff-truncated', b'\x89PNG\r\n\x1a\n-truncated'])
+def test_signature_only_image_is_rejected_before_review(router, monkeypatch, raw):
+    original_client = httpx.Client
+    monkeypatch.setattr('providers.HTTPClient', lambda **kw: original_client(
+        **kw, transport=httpx.MockTransport(lambda request: httpx.Response(200, json={
+            'success': True, 'result': {'image': base64.b64encode(raw).decode()}}))))
+    with pytest.raises(GenerationError, match='응답 형식'):
+        router._cloudflare_image('test')
+
+
+def test_empty_openai_vision_is_failure_not_rejection(router):
+    router.vision_provider = 'openai'
+    router.openai = OpenAI(api_key='test-only', max_retries=0, http_client=httpx.Client(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, json={
+            'id': 'resp_test', 'object': 'response', 'created_at': 0, 'model': 'test',
+            'status': 'completed', 'output': []}))))
+    try:
+        with pytest.raises(GenerationError, match='비어'):
+            router._review_image('data:image/png;base64,' + encoded_image(), 'review', {})
+    finally:
+        router.openai.close()
+
+
+def test_openai_corrupt_image_fails_before_vision(router):
+    router.image_provider = 'openai'
+    calls = []
+    def handler(request):
+        calls.append(request.url.path)
+        return httpx.Response(200, json={'created': 0, 'data': [{'b64_json': 'broken-base64'}]})
+    router.openai = OpenAI(api_key='test-only', max_retries=0, http_client=httpx.Client(
+        transport=httpx.MockTransport(handler)))
+    try:
+        with pytest.raises(GenerationError, match='이미지 파일'):
+            router.generate_reviewed_image('rules', {}, 'review')
+        assert calls == ['/v1/images/generations']
+    finally:
+        router.openai.close()

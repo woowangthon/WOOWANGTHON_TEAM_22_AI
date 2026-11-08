@@ -1,5 +1,5 @@
 """기능별 공급자 연결. 비밀 키와 공급자의 원본 오류는 응답에 포함하지 않습니다."""
-import base64
+from image_data import image_data_url
 
 from prompts import TTS_INSTRUCTIONS
 import binascii
@@ -48,7 +48,7 @@ def provider_failure(provider, error):
     elif status == 429:
         message = '무료 호출·토큰·음성 한도에 도달했습니다. 잠시 후 한도를 확인하고 재시도해 주세요.'
     elif status == 400:
-        message = '모델이 요청 형식을 지원하지 않습니다. 설정한 모델 이름을 확인해 주세요.'
+        message = '요청을 처리하지 못했습니다. 입력 제한·모델 설정·계정 상태를 확인해 주세요.'
     elif isinstance(error, (httpx.TimeoutException,)) or type(error).__name__ == 'APITimeoutError':
         message = '응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.'
     else:
@@ -166,15 +166,7 @@ class ProviderRouter:
             encoded = body.get('result', {}).get('image')
             if not isinstance(encoded, str) or not encoded:
                 raise ProviderError('Cloudflare: 그림 응답이 비어 있습니다.')
-            # 잘못된 데이터나 이미지가 아닌 응답을 데이터 URL로 전달하지 않습니다.
-            raw = base64.b64decode(encoded, validate=True)
-            if raw.startswith(b'\xff\xd8\xff'):
-                mime = 'image/jpeg'
-            elif raw.startswith(b'\x89PNG\r\n\x1a\n'):
-                mime = 'image/png'
-            else:
-                raise ProviderError('Cloudflare: 이미지 형식을 확인하지 못했습니다.')
-            return f'data:{mime};base64,{encoded}'
+            return image_data_url(encoded)
         except httpx.HTTPStatusError as error:
             # HTTPStatusError에는 응답 본문을 출력하지 않습니다.
             safe = type('Status', (), {'status_code': error.response.status_code})()
@@ -194,7 +186,9 @@ class ProviderRouter:
                     input=[{'role': 'system', 'content': instruction}, {'role': 'user', 'content': [
                         {'type': 'input_text', 'text': json.dumps(payload, ensure_ascii=False)},
                         {'type': 'input_image', 'image_url': image_url}]}])
-                return response.output_parsed is not None and response.output_parsed.accepted
+                if response.output_parsed is None:
+                    raise ProviderError('그림 검토 응답이 비어 있습니다. 그림은 표시하지 않습니다.')
+                return response.output_parsed.accepted
             response = client.chat.completions.create(
                 model=setting('GROQ_VISION_MODEL', 'qwen/qwen3.8-27b'),
                 messages=[{'role': 'system', 'content': instruction + '\nReturn JSON: {"accepted": boolean}.'},
@@ -203,7 +197,7 @@ class ProviderRouter:
                               {'type': 'image_url', 'image_url': {'url': image_url}}]}],
                 response_format={'type': 'json_object'}, max_completion_tokens=1024)
             if not response.choices or response.choices[0].finish_reason != 'stop':
-                return False
+                raise ProviderError('그림 검토 응답이 완성되지 않았습니다. 그림은 표시하지 않습니다.')
             return Review.model_validate_json(response.choices[0].message.content or '').accepted
         except OpenAIError as error:
             raise provider_failure(provider, error) from None
@@ -236,7 +230,10 @@ class ProviderRouter:
                     size='1024x1024', quality='low', output_format='png', n=1)
                 if not response.data or not response.data[0].b64_json:
                     raise ProviderError('그림 응답이 비어 있습니다.')
-                image_url = 'data:image/png;base64,' + response.data[0].b64_json
+                try:
+                    image_url = image_data_url(response.data[0].b64_json, 'PNG')
+                except ValueError:
+                    raise ProviderError('이미지 파일 형식이나 데이터를 확인하지 못했습니다.') from None
             except OpenAIError as error:
                 raise provider_failure('openai', error) from None
         return image_url if self._review_image(image_url, review_instruction, payload) else None

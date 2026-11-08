@@ -15,11 +15,13 @@ from fastapi.testclient import TestClient
 from engine import DiaryEngine
 from server import create_app
 from models import DiaryResponse, QuestionResponse
-from providers import setting
+from providers import setting, ProviderRouter
+from visual_models import VisualImageResponse, VisualStoryResponse
+from models import ImageResponse
 
 
 def verify_diary(body, messages):
-    DiaryResponse.model_validate(body)
+    DiaryResponse.model_validate(body, strict=True)
     assert set(body) == set(DiaryResponse.model_fields)
     sources = [{'id': i, 'text': m['text']} for i, m in enumerate(messages) if m['role'] == 'child']
     assert body['sources'] == sources
@@ -32,6 +34,23 @@ def verify_diary(body, messages):
     assert body['text'].split() == ' '.join(p['text'] for p in body['pages']).split()
 
 
+def summarize(calls):
+    """Transport success, fallback and visual acceptance are separate results."""
+    cuts = [c for c in calls if c['path'] == '/api/visual-story/image']
+    times = [c['seconds'] for c in cuts]
+    statuses = {status: sum(c['response'].get('status') == status for c in cuts)
+                for status in ('generated', 'rejected', 'failed', 'mock')}
+    return {
+        'http_errors': sum(c['http_status'] >= 400 for c in calls),
+        'fallback_responses': sum(c['response'].get('fallback') is True for c in calls),
+        'image_status_counts': statuses,
+        'image_mean_seconds': round(sum(times) / len(times), 3) if times else None,
+        'image_max_seconds': max(times) if times else None,
+        'image_unavailable_rate': round(1 - statuses['generated'] / len(cuts), 3) if cuts else None,
+        'quality_review': 'manual_required',
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--live', action='store_true')
@@ -40,25 +59,60 @@ def main():
     parser.add_argument('--output', required=True)
     parser.add_argument('--interval', type=float, default=0, help='Seconds between requests; avoids burst limits')
     args = parser.parse_args()
+    if args.interval < 0:
+        parser.error('--interval must be nonnegative')
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
     report = {'timestamp': datetime.now(timezone.utc).isoformat(), 'mode': 'live' if args.live else 'mock',
               'branch': subprocess.check_output(['git', 'branch', '--show-current'], text=True).strip(),
               'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'dirty': bool(subprocess.check_output(['git', 'status', '--porcelain'], text=True).strip()),
               'settings': {k: setting(k, default) for k, default in {
                   'TEXT_PROVIDER': 'groq', 'GROQ_TEXT_MODEL': 'openai/gpt-oss-20b',
                   'IMAGE_PROVIDER': 'cloudflare', 'CLOUDFLARE_IMAGE_MODEL': '@cf/black-forest-labs/flux-1-schnell',
-                  'VISION_PROVIDER': 'groq', 'GROQ_VISION_MODEL': 'qwen/qwen3.8-27b'}.items()}, 'calls': []}
+                  'VISION_PROVIDER': 'groq', 'GROQ_VISION_MODEL': 'qwen/qwen3.8-27b',
+                  'OPENAI_TEXT_MODEL': setting('TEXT_MODEL', 'gpt-4.1-mini'),
+                  'OPENAI_IMAGE_MODEL': setting('IMAGE_MODEL', 'gpt-image-1.5'),
+                  'OPENAI_VISION_MODEL': 'gpt-4.1-mini'}.items()}, 'calls': []}
     def save():
+        report['summary'] = summarize(report['calls'])
         (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
-    with TestClient(create_app(DiaryEngine(mock=not args.live))) as client:
+    adapter = ProviderRouter()
+    stages = []
+    # Record safe stage outcomes only; no credentials, prompts, or raw errors.
+    for method_name in ('parse', '_cloudflare_image', '_review_image'):
+        original = getattr(adapter, method_name)
+        def traced(*values, _name=method_name, _method=original, **kwargs):
+            started = time.perf_counter()
+            stage = {'operation': _name}
+            if _name == 'parse':
+                stage['schema'] = values[2].__name__
+            try:
+                result = _method(*values, **kwargs)
+                stage['outcome'] = 'completed'
+                if _name == '_review_image':
+                    stage['accepted'] = result
+                return result
+            except Exception as error:
+                stage['outcome'] = 'failed'
+                stage['error_type'] = type(error).__name__
+                raise
+            finally:
+                stage['seconds'] = round(time.perf_counter() - started, 3)
+                stages.append(stage)
+        setattr(adapter, method_name, traced)
+    with TestClient(create_app(DiaryEngine(adapter, mock=not args.live))) as client:
         def call(name, path, request):
             if report['calls'] and args.interval:
                 time.sleep(args.interval)
+            stages.clear()
             start = time.perf_counter()
             response = client.post(path, json=request)
             entry = {'name': name, 'path': path, 'request': request, 'http_status': response.status_code,
                      'seconds': round(time.perf_counter() - start, 3), 'response': response.json()}
+            entry['stages'] = list(stages)
+            report['calls'].append(entry)
+            save()  # Preserve even a malformed image response before validation.
             body = entry['response']
             if body.get('imageUrl'):
                 from PIL import Image
@@ -70,15 +124,24 @@ def main():
                     entry['image'] = {'format': picture.format, 'width': picture.width, 'height': picture.height, 'bytes': len(raw)}
                     assert header == f'data:image/{"jpeg" if picture.format == "JPEG" else "png"};base64'
                     (out / (name + ('.jpg' if picture.format == 'JPEG' else '.png'))).write_bytes(raw)
-            report['calls'].append(entry)
             save()
             print(name, response.status_code, body.get('status', ''), entry['seconds'], flush=True)
             if response.status_code == 200:
                 if path == '/api/chat':
-                    QuestionResponse.model_validate(body)
+                    QuestionResponse.model_validate(body, strict=True)
                     assert set(body) == set(QuestionResponse.model_fields)
                 elif path == '/api/diary':
                     verify_diary(body, request['messages'])
+                elif path == '/api/visual-story':
+                    VisualStoryResponse.model_validate(body, strict=True)
+                elif path == '/api/visual-story/image':
+                    VisualImageResponse.model_validate(body, strict=True)
+                    assert (body['imageUrl'] is not None) == (body['status'] == 'generated')
+                    assert body['mock'] == (body['status'] == 'mock')
+                    assert body['requires_confirmation'] is True
+                elif path == '/api/image':
+                    ImageResponse.model_validate(body, strict=True)
+                    assert bool(body['imageUrl']) == (not body['rejected'])
             return body
         if args.smoke:
             call('explicit_finish', '/api/chat', {'messages': [{'role': 'child', 'text': '이제 그만할래. 일기로 만들어 줘.'}]})

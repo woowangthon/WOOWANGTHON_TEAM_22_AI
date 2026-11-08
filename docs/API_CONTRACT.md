@@ -108,7 +108,7 @@ FE에서 글을 확인하고 BE가 선택한 한 페이지의 글을 보냅니�
 {"imageUrl":"data:image/png;base64,...","requires_confirmation":true,"rejected":false}
 ```
 
-그림 검토에 실패하면 HTTP 200이지만 다음 결과를 반환합니다.
+완성된 그림 검토가 거절하면 HTTP 200이지만 다음 결과를 반환합니다.
 
 ```json
 {"imageUrl":null,"requires_confirmation":true,"rejected":true}
@@ -177,3 +177,5 @@ mock에서는 고정 질문과 null 오디오, mock 안내 audio_error를 반환
 `POST /api/visual-story`는 확인한 diary_text, confirmed, format(storybook/comic4/both), storybook_pages를 받아 그림책·4컷의 원문 기반 장면 구성을 반환한다. `POST /api/visual-story/image`는 그 응답의 diary_text, diary_hash, format, source_ids, confirmed로 한 장면의 그림을 생성한다.
 
 이 API의 source_ids는 대화 메시지 위치가 아니라, 확인한 일기를 나눈 원문 조각 번호다. 이미지 생성은 장면별 별도 요청이며 모델 실패 시 HTTP 200/status=failed, 검토 거절 시 status=rejected를 반환한다. 같은 장면 반복은 reuse_scene_id로 재사용한다. FE는 그림책을 페이지로, 만화를 정확히 4칸의 2×2 격자로 표시한다. 상세 입력·응답·오류·변수는 [VISUAL_STORY.md](VISUAL_STORY.md)를 따른다.
+
+이미지는 PNG 또는 JPEG data URL이다. 이미지 전체 디코딩 또는 검토 응답 완성에 실패하면 `/api/image`는 오류를, `/api/visual-story/image`는 status=failed를 반환한다. 완성된 검토의 accepted=false만 rejected로 분류한다.

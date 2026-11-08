@@ -1,0 +1,14 @@
+{
+  "diary_hash": "8884860bb3c860bb186995f5919514141f10b6cd7b4e72027573b79bf56079b9",
+  "scene_key": "546e7e7433a4d768d0bff032273886ddbc0cb028159c60c52f58e3b86489b336",
+  "caption": "책을 덮었다.",
+  "source_ids": [
+    4
+  ],
+  "format": "comic4",
+  "imageUrl": null,
+  "status": "failed",
+  "error": "cloudflare: 요청을 처리하지 못했습니다. 입력 제한·모델 설정·계정 상태를 확인해 주세요.",
+  "requires_confirmation": true,
+  "mock": false
+}

@@ -113,3 +113,21 @@ def test_be_metadata_not_accepted_by_ai():
     client=TestClient(create_app(DiaryEngine(mock=True)))
     response=client.post('/api/diary',json={'messages':[], 'user_id':'user1','date':'2026-11-05'})
     assert response.status_code==422
+
+
+def test_identical_question_is_not_repeated_even_if_model_review_accepts():
+    messages = conversation()
+    previous = messages[-2].text
+    adapter = FakeAdapter(QuestionCandidate(question=previous, finished=False), Review(accepted=True))
+    result = DiaryEngine(adapter).next_question(messages)
+    assert result['fallback'] is True
+    assert result['question'] != previous
+
+
+def test_rejected_question_does_not_repeat_previous_fallback():
+    messages = conversation() + [Message(role='assistant', text='더 들려주고 싶은 이야기가 있어?'),
+                                Message(role='child', text='모르겠어.')]
+    adapter = FakeAdapter(QuestionCandidate(question='슬펐지?', finished=False), Review(accepted=False))
+    result = DiaryEngine(adapter).next_question(messages)
+    assert result['fallback'] is True
+    assert result['question'] != messages[-2].text

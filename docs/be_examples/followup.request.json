@@ -1,0 +1,12 @@
+{
+  "messages": [
+    {
+      "role": "assistant",
+      "text": "오늘 무슨 일이 있었어?"
+    },
+    {
+      "role": "child",
+      "text": "친구랑 공원에서 공놀이 했어."
+    }
+  ]
+}

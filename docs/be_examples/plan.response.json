@@ -1,0 +1,82 @@
+{
+  "diary_text": "빨간 공을 굴렸다. 파란 블록을 쌓았다. 종이에 동그라미를 그렸다. 책을 펼쳤다. 책을 덮었다.",
+  "diary_hash": "8884860bb3c860bb186995f5919514141f10b6cd7b4e72027573b79bf56079b9",
+  "sources": [
+    {
+      "id": 0,
+      "text": "빨간 공을 굴렸다."
+    },
+    {
+      "id": 1,
+      "text": "파란 블록을 쌓았다."
+    },
+    {
+      "id": 2,
+      "text": "종이에 동그라미를 그렸다."
+    },
+    {
+      "id": 3,
+      "text": "책을 펼쳤다."
+    },
+    {
+      "id": 4,
+      "text": "책을 덮었다."
+    }
+  ],
+  "storybook": null,
+  "comic4": {
+    "format": "comic4",
+    "layout": "grid_2x2",
+    "planning_mode": "model",
+    "scenes": [
+      {
+        "scene_id": "comic4-1",
+        "order": 1,
+        "caption": "빨간 공을 굴렸다.",
+        "source_ids": [
+          0
+        ],
+        "imageUrl": null,
+        "repeated": false,
+        "reuse_scene_id": null
+      },
+      {
+        "scene_id": "comic4-2",
+        "order": 2,
+        "caption": "파란 블록을 쌓았다.",
+        "source_ids": [
+          1
+        ],
+        "imageUrl": null,
+        "repeated": false,
+        "reuse_scene_id": null
+      },
+      {
+        "scene_id": "comic4-3",
+        "order": 3,
+        "caption": "종이에 동그라미를 그렸다.\n책을 펼쳤다.",
+        "source_ids": [
+          2,
+          3
+        ],
+        "imageUrl": null,
+        "repeated": false,
+        "reuse_scene_id": null
+      },
+      {
+        "scene_id": "comic4-4",
+        "order": 4,
+        "caption": "책을 덮었다.",
+        "source_ids": [
+          4
+        ],
+        "imageUrl": null,
+        "repeated": false,
+        "reuse_scene_id": null
+      }
+    ],
+    "notices": []
+  },
+  "requires_confirmation": true,
+  "mock": false
+}

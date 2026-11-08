@@ -82,3 +82,5 @@ python -m pytest -q
 구조화된 응답 구현 참고: [OpenAI 공식 Structured Outputs 문서](https://developers.openai.com/api/docs/guides/structured-outputs).
 
 통합 검증 실행법과 실제 호출 결과는 [통합 검증 보고서](docs/INTEGRATION_VERIFICATION.md)를 참고하세요.
+
+최신 요구사항별 구현 상태와 보완 사항: [요구사항 재점검](docs/REQUIREMENTS_AUDIT.md).

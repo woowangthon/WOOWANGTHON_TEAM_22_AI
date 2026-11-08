@@ -1,5 +1,6 @@
 """[3] 대화와 일기 생성 로직. API 키를 프런트엔드에 전달하지 않습니다."""
 import json
+from image_data import image_data_url
 import os
 import re
 from functools import cached_property
@@ -41,14 +42,19 @@ class OpenAIAdapter:
         )
         if not result.data or not result.data[0].b64_json:
             raise GenerationError('이미지를 받지 못했습니다.')
-        image_url = 'data:image/png;base64,'+result.data[0].b64_json
+        try:
+            image_url = image_data_url(result.data[0].b64_json, 'PNG')
+        except ValueError:
+            raise GenerationError('이미지 파일 형식이나 데이터를 확인하지 못했습니다.') from None
         response = self.client.responses.parse(
             model=os.getenv('TEXT_MODEL','gpt-4.1-mini'), store=False, text_format=Review,
             input=[{'role':'system','content':IMAGE_REVIEW}, {'role':'user','content':[
                 {'type':'input_text','text':json.dumps({'confirmed_text':text},ensure_ascii=False)},
                 {'type':'input_image','image_url':image_url}]}],
         )
-        if response.output_parsed is None or not response.output_parsed.accepted:
+        if response.output_parsed is None:
+            raise GenerationError('그림 검토 응답이 비어 있습니다.')
+        if not response.output_parsed.accepted:
             return None  # 자동 검토가 거절한 그림은 백엔드에 반환하지 않습니다.
         return image_url
 
@@ -86,8 +92,14 @@ class DiaryEngine:
             return {'question':examples[min(len(child_messages)-1,2)], 'finished':False, 'mock':True}
         candidate = self.adapter.parse(CHAT_PROMPT, {'conversation':conversation}, QuestionCandidate)
         review = self.adapter.parse(CHAT_REVIEW, {'conversation':conversation,'candidate':candidate.model_dump()}, Review)
-        accepted = review.accepted and bool(candidate.question.strip()) and len(candidate.question)<=150
-        return {'question':candidate.question if accepted else '더 들려주고 싶은 이야기가 있어?',
+        normalize = lambda text: re.sub(r'[^가-힣a-z0-9]', '', text.lower())
+        previous = {normalize(item['text']) for item in conversation if item['role'] == 'assistant'}
+        accepted = (review.accepted and bool(candidate.question.strip()) and len(candidate.question) <= 150
+                    and normalize(candidate.question) not in previous)
+        alternatives = ['더 들려주고 싶은 이야기가 있어?', '다른 이야기도 남기고 싶어?',
+                        '이야기를 더 하거나 여기서 일기를 확인해도 괜찮아.']
+        replacement = next((text for text in alternatives if normalize(text) not in previous), alternatives[-1])
+        return {'question':candidate.question if accepted else replacement,
                 'finished':candidate.finished if accepted else False, 'mock':False, 'fallback':not accepted}
 
     def make_diary(self, messages):

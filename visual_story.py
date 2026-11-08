@@ -1,6 +1,7 @@
 """확인한 일기를 그림책과 4컷 콘텐츠로 변환합니다. 화면·DB 저장은 하지 않습니다."""
 import hashlib
 import json
+from image_data import image_data_url
 import os
 import re
 
@@ -155,12 +156,17 @@ class VisualStoryService:
             size='1024x1024', quality='low', output_format='png', n=1)
         if not generated.data or not generated.data[0].b64_json:
             raise GenerationError('그림 응답이 비어 있습니다.')
-        image_url = 'data:image/png;base64,' + generated.data[0].b64_json
+        try:
+            image_url = image_data_url(generated.data[0].b64_json, 'PNG')
+        except ValueError:
+            raise GenerationError('이미지 파일 형식이나 데이터를 확인하지 못했습니다.') from None
         review = client.responses.parse(
             model=os.getenv('TEXT_MODEL', 'gpt-4.1-mini'), store=False, text_format=Review,
             input=[{'role': 'system', 'content': REVIEW_PROMPT}, {'role': 'user', 'content': [
                 {'type': 'input_text', 'text': json.dumps(payload, ensure_ascii=False)},
                 {'type': 'input_image', 'image_url': image_url}]}])
-        if review.output_parsed is None or not review.output_parsed.accepted:
+        if review.output_parsed is None:
+            raise GenerationError('그림 검토 응답이 비어 있습니다.')
+        if not review.output_parsed.accepted:
             return None
         return image_url

@@ -59,7 +59,7 @@ class DiaryResponse(StrictModel):
     mock: bool
 
 class ImageResponse(StrictModel):
-    imageUrl: str | None  # PNG 데이터 URL. 영구 저장 URL은 BE가 생성합니다.
+    imageUrl: str | None  # PNG/JPEG 데이터 URL. 영구 저장 URL은 BE가 생성합니다.
     requires_confirmation: bool
     rejected: bool
 

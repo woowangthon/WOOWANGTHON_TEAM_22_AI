@@ -1,0 +1,128 @@
+[
+  {
+    "name": "followup",
+    "path": "/api/chat",
+    "http_status": 200,
+    "seconds": 1.756,
+    "source": "recheck-live",
+    "request_file": "followup.request.json",
+    "response_file": "followup.response.json"
+  },
+  {
+    "name": "short",
+    "path": "/api/chat",
+    "http_status": 200,
+    "seconds": 2.479,
+    "source": "recheck-live",
+    "request_file": "short.request.json",
+    "response_file": "short.response.json"
+  },
+  {
+    "name": "correction",
+    "path": "/api/chat",
+    "http_status": 200,
+    "seconds": 1.558,
+    "source": "recheck-live",
+    "request_file": "correction.request.json",
+    "response_file": "correction.response.json"
+  },
+  {
+    "name": "refusal",
+    "path": "/api/chat",
+    "http_status": 200,
+    "seconds": 2.179,
+    "source": "recheck-live",
+    "request_file": "refusal.request.json",
+    "response_file": "refusal.response.json"
+  },
+  {
+    "name": "finish",
+    "path": "/api/chat",
+    "http_status": 200,
+    "seconds": 0.006,
+    "source": "recheck-live",
+    "request_file": "finish.request.json",
+    "response_file": "finish.response.json"
+  },
+  {
+    "name": "diary",
+    "path": "/api/diary",
+    "http_status": 200,
+    "seconds": 2.204,
+    "source": "recheck-live",
+    "request_file": "diary.request.json",
+    "response_file": "diary.response.json"
+  },
+  {
+    "name": "plan",
+    "path": "/api/visual-story",
+    "http_status": 200,
+    "seconds": 0.968,
+    "source": "recheck-live",
+    "request_file": "plan.request.json",
+    "response_file": "plan.response.json"
+  },
+  {
+    "name": "short_plan",
+    "path": "/api/visual-story",
+    "http_status": 200,
+    "seconds": 0.007,
+    "source": "recheck-live",
+    "request_file": "short_plan.request.json",
+    "response_file": "short_plan.response.json"
+  },
+  {
+    "name": "comic4-1",
+    "path": "/api/visual-story/image",
+    "http_status": 200,
+    "seconds": 3.793,
+    "source": "recheck-live",
+    "request_file": "comic4-1.request.json",
+    "response_file": "comic4-1.response.json"
+  },
+  {
+    "name": "comic4-2",
+    "path": "/api/visual-story/image",
+    "http_status": 200,
+    "seconds": 4.621,
+    "source": "recheck-live",
+    "request_file": "comic4-2.request.json",
+    "response_file": "comic4-2.response.json"
+  },
+  {
+    "name": "comic4-3",
+    "path": "/api/visual-story/image",
+    "http_status": 200,
+    "seconds": 4.005,
+    "source": "recheck-live",
+    "request_file": "comic4-3.request.json",
+    "response_file": "comic4-3.response.json"
+  },
+  {
+    "name": "comic4-4",
+    "path": "/api/visual-story/image",
+    "http_status": 200,
+    "seconds": 2.366,
+    "source": "recheck-live",
+    "request_file": "comic4-4.request.json",
+    "response_file": "comic4-4.response.json"
+  },
+  {
+    "name": "legacy_image",
+    "path": "/api/image",
+    "http_status": 200,
+    "seconds": 3.393,
+    "source": "recheck-live",
+    "request_file": "legacy_image.request.json",
+    "response_file": "legacy_image.response.json"
+  },
+  {
+    "name": "simple_diary_previous_run",
+    "path": "/api/diary",
+    "http_status": 200,
+    "seconds": 1.717,
+    "source": "fixed-live (previous run)",
+    "request_file": "simple_diary_previous_run.request.json",
+    "response_file": "simple_diary_previous_run.response.json"
+  }
+]

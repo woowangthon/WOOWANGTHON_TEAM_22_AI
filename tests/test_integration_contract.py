@@ -77,3 +77,41 @@ def test_negated_or_quoted_finish_is_not_treated_as_stop():
         for text in ('그만하고 싶지 않아.', '친구가 그만할래라고 했어.', '그만할래? 아니 계속할래.'):
             body = client.post('/api/chat', json={'messages': [{'role': 'child', 'text': text}]}).json()
             assert body['finished'] is False
+
+
+def test_sixty_messages_keep_original_indices_and_at_most_six_pages():
+    messages = [{'role': 'assistant' if i % 2 == 0 else 'child', 'text': f'{i}번째 이야기'} for i in range(60)]
+    with TestClient(create_app(DiaryEngine(mock=True))) as client:
+        response = client.post('/api/diary', json={'messages': messages})
+    assert response.status_code == 200
+    body = response.json()
+    verify_diary(body, messages)
+    assert len(body['pages']) == 6
+    assert [s['id'] for s in body['sources']] == list(range(1, 60, 2))
+    assert body['text'] == '\n'.join(m['text'] for m in messages if m['role'] == 'child')
+
+
+def test_twenty_generated_sentences_are_all_preserved():
+    class Adapter:
+        def parse(self, instruction, payload, schema):
+            if schema is Review:
+                return Review(accepted=True)
+            return DiaryCandidate(sentences=[Sentence(text=f'{i}번째 일을 했다.', source_ids=[i]) for i in range(20)])
+    messages = [{'role': 'child', 'text': f'{i}번째 일을 했어.'} for i in range(20)]
+    with TestClient(create_app(DiaryEngine(Adapter()))) as client:
+        response = client.post('/api/diary', json={'messages': messages})
+    verify_diary(response.json(), messages)
+    assert len(response.json()['pages']) <= 6
+    assert response.json()['text'] == ' '.join(f'{i}번째 일을 했다.' for i in range(20))
+
+
+def test_conversation_total_limit_is_not_silently_truncated():
+    with TestClient(create_app(DiaryEngine(mock=True))) as client:
+        body = {'messages': [{'role': 'child', 'text': '가' * 2000} for _ in range(10)]}
+        valid = client.post('/api/diary', json=body)
+        assert valid.status_code == 200
+        verify_diary(valid.json(), body['messages'])
+        body['messages'].append({'role': 'child', 'text': '나'})
+        invalid = client.post('/api/diary', json=body)
+        assert invalid.status_code == 503
+        assert set(invalid.json()) == {'error'}

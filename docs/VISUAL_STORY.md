@@ -12,32 +12,17 @@
 - 글은 이미지 밖에서 FE가 표시한다. 이미지 안에는 한글 캡션이나 말풍선을 생성하지 않는다.
 - 그림마다 모델 검토를 거치며 거절 또는 실패 시 원문 글은 유지한다.
 
-**이 파일은 AI 기능 추가 안내다.** FE 화면·완성된 PDF·4컷 합본 PNG를 만드는 코드는 포함하지 않는다. AI는 장면별 글·그림과 layout을 반환하고 FE가 페이지 또는 2×2 격자로 표시한다. BE는 결과·이미지를 저장한다. 실제 유료 생성 결과와 장면별 캐릭터 일관성은 아직 검증하지 않았다.
+**이 파일은 AI 기능 추가 안내다.** FE 화면·완성된 PDF·4컷 합본 PNG를 만드는 코드는 포함하지 않는다. AI는 장면별 글·그림과 layout을 반환하고 FE가 페이지 또는 2×2 격자로 표시한다. BE는 결과·이미지를 저장한다. 실제 호출 결과와 남은 품질 문제는 [통합 검증 기록](INTEGRATION_VERIFICATION.md) 및 [요구사항 재점검](REQUIREMENTS_AUDIT.md)에 구분해 기록한다.
 
-## 적용할 파일 — 이 변경분만 복사
+## 실행과 의존성
 
-기존 AI 저장소 루트에 다음 파일을 같은 위치로 반영한다. 직접 수정한 파일은 비교 후 병합한다.
-
-| 파일 | 변경 |
-| --- | --- |
-| server.py | 수정: v1.2 및 API 2개 추가 |
-| visual_models.py | 추가: 그림책·만화 요청/응답 자료형 |
-| visual_story.py | 추가: 장면 구성·이미지 생성·검토 |
-| tests/test_diary.py | 수정: API 목록 검사에 새 경로 추가 |
-| tests/test_visual_story.py | 추가: 새 기능 검사 |
-| docs/VISUAL_STORY.md | 추가: 이 안내서 및 변수 설명 |
-| docs/API_CONTRACT.md | 수정: v1.2 연동 규격 보충 |
-
-`.env`, `.git`, requirements.txt, engine.py, models.py, prompts.py, voice.py는 이 패치에 포함하지 않는다. 새 패키지 설치나 필수 환경 변수 추가도 없다. 기존 음성 지원 v1.1 코드가 설치되어 있어야 한다.
-
-서버가 실행 중이면 Ctrl+C로 종료한 후 실행한다.
+현재 checkout 전체를 기준으로 `python -m pip install -r requirements.txt` 후 실행한다. 이미지 데이터 전체 디코딩 검사를 위해 Pillow가 필요하다. `.env` 설정은 [공급자 안내](MULTI_PROVIDER_SETUP.md)를 따른다. 서버가 실행 중이면 재시작한다.
 
 ```sh
-source .venv/bin/activate
 python server.py
 ```
 
-Windows는 `.\.venv\Scripts\python.exe server.py`로 실행한다. http://127.0.0.1:8002/docs 를 새로고침해 `/api/visual-story`와 `/api/visual-story/image`가 보이는지 확인한다.
+개발 API 문서는 http://127.0.0.1:8002/docs 이다.
 
 ## 입력은 어디서 가져오나?
 
@@ -111,7 +96,7 @@ format은 storybook 또는 comic4이다. both는 이미지 요청에서 사용�
 | diary_hash | 요청 일기의 버전 확인용 값 |
 | scene_key | 일기+형식+원문 번호 조합의 해시 |
 | caption / source_ids / format | 이 그림의 기준 글과 근거 |
-| imageUrl | 생성·검토를 통과한 PNG 데이터 URL 또는 null |
+| imageUrl | 생성·검토를 통과한 PNG/JPEG 데이터 URL 또는 null |
 | status | generated / rejected / failed / mock |
 | error | 실패 안내 또는 null |
 | requires_confirmation | 생성 그림을 사람이 확인해야 한다는 표시 |
@@ -120,8 +105,8 @@ format은 storybook 또는 comic4이다. both는 이미지 요청에서 사용�
 HTTP 200이라도 status가 generated인지 확인한다.
 
 - generated: imageUrl을 표시하고 사용/제외를 확인한다.
-- rejected: 검토에서 거절한 그림은 반환하지 않는다. 글은 유지한다.
-- failed: 모델 요청 또는 검토 처리 실패. error를 안내하고 해당 장면만 재시도한다.
+- rejected: 완성된 검토가 accepted=false로 거절한 그림은 반환하지 않는다. 글은 유지한다.
+- failed: 모델 요청, 이미지 디코딩 또는 검토 처리 실패(빈 응답·잘린 응답 포함). error를 안내하고 해당 장면만 재시도한다.
 - mock: 실제 그림 없이 구조만 반환한다. imageUrl은 null이다.
 
 같은 원문이라도 그림책과 만화의 scene_key는 다르다. 같은 형식·같은 원문의 반복 컷은 같은 scene_key이므로 재사용할 수 있다. **해시는 인증·서명이 아니며 AI에 중복 호출 제거 저장소가 있는 것도 아니다.** BE가 세션/사용자 권한, 생성 버전, 장면별 중복 요청을 관리한다.
@@ -140,7 +125,7 @@ HTTP 200이라도 status가 generated인지 확인한다.
 
 FE는 그림책 scenes를 페이지로, comic4 scenes를 2×2 격자로 표시한다. 캡션은 반환 순서대로 이미지 밑에 그대로 표시한다. 반복 컷의 그림은 reuse_scene_id로 참조한다. 별도 말풍선·반전·결말을 임의로 생성하지 않는다.
 
-BE는 API 결과의 PNG 데이터 URL을 바이너리로 디코딩해 기존 파일 저장소에 저장하고 FE용 URL로 바꿀 수 있다. 일기 글이 수정되면 구성을 다시 생성하고 이전 그림은 새 일기에 자동 연결하지 않는다. 응답이 늦게 도착했을 때 diary_hash와 페이지 버전을 비교해 오래된 결과를 폐기한다.
+BE는 API 결과의 PNG/JPEG 데이터 URL을 바이너리로 디코딩해 기존 파일 저장소에 저장하고 FE용 URL로 바꿀 수 있다. 일기 글이 수정되면 구성을 다시 생성하고 이전 그림은 새 일기에 자동 연결하지 않는다. 응답이 늦게 도착했을 때 diary_hash와 페이지 버전을 비교해 오래된 결과를 폐기한다.
 
 ## 제한·오류
 
@@ -152,7 +137,7 @@ BE는 API 결과의 PNG 데이터 URL을 바이너리로 디코딩해 기존 파
 - 422: 형식·길이·근거 번호 오류.
 - 모델 구성 오류는 planning_mode=fallback으로, 이미지 처리 오류는 HTTP 200/status=failed로 반환한다. BE는 상태 필드를 반드시 확인한다.
 
-이미지 한 장마다 이미지 생성 1회와 텍스트 모델의 시각 검토 1회가 실행된다. 기본 그림책 4장과 만화 4장을 모두 만들면 최대 8장 생성 비용이 발생한다. 반복 컷은 재사용한다. 이미지별 생성 180초+검토 45초의 타임아웃 설정을 사용하므로 BE에서 장면 단위 대기/비동기 작업을 구성한다. 모든 장면을 한 요청에 몰아 생성하는 서버 배치 API는 없다. 제한 없이 병렬 호출하지 말고 호출 수와 대기 화면을 관리한다.
+기본 Cloudflare 경로는 한 장마다 Groq 묘사 1회, 이미지 생성 1회, Groq 시각 검토 1회가 실행된다. 기본 그림책 4장과 만화 4장을 모두 만들면 최대 8장 생성 비용이 발생한다. 반복 컷은 재사용한다. 이미지별 묘사 60초+생성 180초+검토 60초의 타임아웃 설정을 사용하므로 BE에서 장면 단위 대기/비동기 작업을 구성한다. 모든 장면을 한 요청에 몰아 생성하는 서버 배치 API는 없다. 제한 없이 병렬 호출하지 말고 호출 수와 대기 화면을 관리한다.
 
 ## 변수·함수 설명
 
@@ -181,10 +166,8 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-기존 34개와 새 검사 29개, 총 63개 검사를 통과했다. 실제 API 대신 테스트 응답을 사용했으며 실제 이미지 생성·실제 계정의 모델 권한·FE 렌더링은 검증하지 않았다. API 키를 읽거나 새 이미지 비용을 발생시키지 않았다.
+현재 테스트 개수와 실제/모의 결과는 [요구사항 재점검](REQUIREMENTS_AUDIT.md)을 참고한다. 모의 검사는 실제 모델 품질의 근거가 아니다.
 
-글의 원문 보존은 코드에서 검사한다. 그러나 그림 속 시각적 세부가 원문과 완전히 일치한다고 보장할 수는 없다. 모델 검토와 사람의 확인이 필요하다. 장면마다 독립적으로 그리므로 캐릭터 모습이 완전히 같다는 보장도 없다. 외모가 미정이면 중립 실루엣을 사용하도록 지시했다.
+글의 원문 보존은 코드에서 검사한다. 그림 속 인물·상황·행동은 모델 검토와 사람 확인이 필요하다. 장면마다 독립적으로 생성하므로 캐릭터 모습이 완전히 같다는 보장은 없다. 미정 외모는 중립 실루엣을 지시하지만 실제 준수 여부는 별도 검사 대상이다.
 
-기존 IMAGE_MODEL 설정은 그대로 사용한다. 공식 안내에 gpt-image-1.5의 2026-12-01 종료 예정이 표시되어 있으므로 장기 운영 전 지원 모델로 별도 검증·전환해야 한다. 이번 패치는 모델을 자동 변경하지 않는다.
-
-참고: [OpenAI 이미지 생성 API](https://developers.openai.com/api/reference/resources/images/methods/generate), [기존 이미지 모델 안내](https://developers.openai.com/api/docs/guides/image-prompting).
+기본 이미지 모델은 Cloudflare FLUX.1 schnell이며 `.env`에서 IMAGE_PROVIDER=openai를 선택한 경우에만 OPENAI_IMAGE_MODEL(또는 기존 IMAGE_MODEL)을 사용한다. 공급자 전환을 자동으로 수행하지 않는다.
