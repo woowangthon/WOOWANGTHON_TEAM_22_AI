@@ -90,6 +90,8 @@ def main():
             try:
                 result = _method(*values, **kwargs)
                 stage['outcome'] = 'completed'
+                if _name == 'parse' and hasattr(result, 'accepted'):
+                    stage['accepted'] = result.accepted
                 if _name == '_review_image':
                     stage['accepted'] = result
                 return result

@@ -8,9 +8,14 @@ class FakeAdapter:
     def __init__(self, *answers):
         self.answers = list(answers)
         self.calls = []
+        self.instructions = []
     def parse(self, instruction, payload, schema):
         self.calls.append((payload, schema))
-        return self.answers.pop(0)
+        self.instructions.append(instruction)
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
     def image(self, text):
         return None
 
@@ -36,7 +41,7 @@ def test_unapproved_question_replaced():
     assert DiaryEngine(adapter).next_question(conversation())['fallback']
 
 def test_supported_diary():
-    adapter=FakeAdapter(DiaryCandidate(sentences=[Sentence(text='친구와 공놀이를 해서 즐거웠다.',source_ids=[1,3])]),Review(accepted=True))
+    adapter=FakeAdapter(DiaryCandidate(sentences=[Sentence(text='친구와 공놀이를 했다. 즐거웠다.',source_ids=[1,3])]),Review(accepted=True))
     result=DiaryEngine(adapter).make_diary(conversation())
     assert not result['fallback']
     assert result['pages'][0]['source_ids']==[1,3]
@@ -59,7 +64,8 @@ def test_invalid_source_falls_back(ids):
     assert len(adapter.calls)==1
 
 def test_review_rejects_unsupported_emotion():
-    adapter=FakeAdapter(DiaryCandidate(sentences=[Sentence(text='슬펐다.',source_ids=[1])]),Review(accepted=False))
+    candidate = DiaryCandidate(sentences=[Sentence(text='슬펐다.',source_ids=[1])])
+    adapter=FakeAdapter(candidate,Review(accepted=False),candidate,Review(accepted=False))
     result=DiaryEngine(adapter).make_diary(conversation())
     assert result['fallback'] and '슬펐다' not in result['text']
 

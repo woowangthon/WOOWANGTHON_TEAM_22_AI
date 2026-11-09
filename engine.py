@@ -1,12 +1,15 @@
 """[3] 대화와 일기 생성 로직. API 키를 프런트엔드에 전달하지 않습니다."""
 import json
+import logging
 from image_data import image_data_url
 import os
 import re
 from functools import cached_property
 from openai import OpenAI
 from models import QuestionCandidate, DiaryCandidate, Review
-from prompts import CHAT_PROMPT, CHAT_REVIEW, DIARY_PROMPT, DIARY_REVIEW, IMAGE_PROMPT, IMAGE_REVIEW
+from prompts import CHAT_PROMPT, CHAT_REVIEW, DIARY_PROMPT, DIARY_REVIEW, DIARY_REPAIR, IMAGE_PROMPT, IMAGE_REVIEW
+
+logger = logging.getLogger(__name__)
 
 class GenerationError(Exception):
     """키 누락·불완전 응답처럼 사용자에게 알려야 하는 오류입니다."""
@@ -110,17 +113,41 @@ class DiaryEngine:
         fallback = self.mock  # 검사 실패 시 원문을 보여주며, 내용을 새로 만들어 채우지 않습니다.
         sentences = []
         if not self.mock:
-            candidate = self.adapter.parse(DIARY_PROMPT, {'conversation':conversation,'sources':sources}, DiaryCandidate)
             allowed_ids = {source['id'] for source in sources}
-            valid = 0<len(candidate.sentences)<=20 and all(
-                sentence.text.strip() and len(sentence.text)<=500 and sentence.source_ids
-                and set(sentence.source_ids)<=allowed_ids for sentence in candidate.sentences)
-            if valid:
-                review = self.adapter.parse(DIARY_REVIEW, {'conversation':conversation,'sources':sources,'candidate':candidate.model_dump()}, Review)
-                valid = review.accepted
-            fallback = not valid
-            if valid:
-                sentences = [sentence.model_dump() for sentence in candidate.sentences]
+            payload = {'conversation': conversation, 'sources': sources}
+            fallback = True
+            # 검토 거절만 한 번 보정합니다. 통신/형식 오류는 기존 HTTP 오류로 전파합니다.
+            def parse(stage, instruction, data, schema, attempt):
+                try:
+                    return self.adapter.parse(instruction, data, schema)
+                except Exception:
+                    # 대화, 후보, 키, 공급자 원본 오류를 로그에 남기지 않습니다.
+                    logger.warning('diary outcome=%s_failed attempt=%d', stage, attempt)
+                    raise
+
+            for attempt in (1, 2):
+                instruction = DIARY_PROMPT if attempt == 1 else DIARY_PROMPT + '\n' + DIARY_REPAIR
+                candidate = parse('generation', instruction, payload, DiaryCandidate, attempt)
+                if not (0 < len(candidate.sentences) <= 20 and all(
+                        sentence.text.strip() and len(sentence.text) <= 500
+                        for sentence in candidate.sentences)):
+                    logger.warning('diary outcome=candidate_validation_failed attempt=%d', attempt)
+                    break
+                if not all(sentence.source_ids and set(sentence.source_ids) <= allowed_ids
+                           for sentence in candidate.sentences):
+                    logger.warning('diary outcome=source_validation_failed attempt=%d', attempt)
+                    break
+                review = parse('review', DIARY_REVIEW,
+                               {'conversation': conversation, 'sources': sources,
+                                'candidate': candidate.model_dump()}, Review, attempt)
+                if review.accepted:
+                    sentences = [sentence.model_dump() for sentence in candidate.sentences]
+                    fallback = False
+                    logger.info('diary outcome=accepted attempt=%d', attempt)
+                    break
+                logger.warning('diary outcome=review_rejected attempt=%d', attempt)
+                payload = {'conversation': conversation, 'sources': sources,
+                           'previous_candidate': candidate.model_dump()}
         if fallback:
             sentences = [{'text':source['text'],'source_ids':[source['id']]} for source in sources]
         page_size = max(1, (len(sentences)+5)//6)  # 최대 6페이지로 묶되 원문/문장을 버리지 않습니다.
