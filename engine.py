@@ -4,12 +4,16 @@ import logging
 from image_data import image_data_url
 import os
 import re
+import time
 from functools import cached_property
 from openai import OpenAI
 from models import QuestionCandidate, DiaryCandidate, Review
 from prompts import CHAT_PROMPT, CHAT_REVIEW, DIARY_PROMPT, DIARY_REVIEW, DIARY_REPAIR, IMAGE_PROMPT, IMAGE_REVIEW
 
 logger = logging.getLogger(__name__)
+DIARY_REQUEST_BUDGET = 100.0
+DIARY_RESPONSE_RESERVE = 1.0
+DIARY_REPAIR_MIN_BUDGET = 10.0  # 재작성과 재검토를 모두 수행할 최소 잔여 예산입니다.
 
 class GenerationError(Exception):
     """키 누락·불완전 응답처럼 사용자에게 알려야 하는 오류입니다."""
@@ -25,8 +29,9 @@ class OpenAIAdapter:
             raise GenerationError('.env에 OPENAI_API_KEY를 설정한 뒤 서버를 다시 실행해 주세요.')
         return OpenAI(api_key=api_key, timeout=45, max_retries=0)
 
-    def parse(self, instruction, payload, schema):
-        response = self.client.responses.parse(
+    def parse(self, instruction, payload, schema, *, timeout=None):
+        client = self.client if timeout is None else self.client.with_options(timeout=timeout, max_retries=0)
+        response = client.responses.parse(
             model=os.getenv('TEXT_MODEL', 'gpt-4.1-mini'),
             input=[{'role':'system','content':instruction},
                    {'role':'user','content':json.dumps(payload, ensure_ascii=False)}],
@@ -62,12 +67,13 @@ class OpenAIAdapter:
         return image_url
 
 class DiaryEngine:
-    def __init__(self, adapter=None, mock=False):
+    def __init__(self, adapter=None, mock=False, *, clock=None):
         if adapter is None:
             from providers import ProviderRouter  # 순환 import 없이 기능별 공급자를 구성합니다.
             adapter = ProviderRouter()
         self.adapter = adapter
         self.mock = mock  # 실제 AI 없이 백엔드와의 연결만 시험할 때 사용합니다.
+        self.clock = clock or time.monotonic
 
     def conversation_data(self, messages):
         conversation = [message.model_dump() for message in messages]
@@ -105,7 +111,9 @@ class DiaryEngine:
         return {'question':candidate.question if accepted else replacement,
                 'finished':candidate.finished if accepted else False, 'mock':False, 'fallback':not accepted}
 
-    def make_diary(self, messages):
+    def make_diary(self, messages, *, deadline=None):
+        deadline = self.clock() + DIARY_REQUEST_BUDGET if deadline is None else deadline
+        model_deadline = deadline - DIARY_RESPONSE_RESERVE
         conversation = self.conversation_data(messages)
         sources = [{'id':index,'text':item['text']} for index,item in enumerate(conversation) if item['role']=='child']
         if not sources:
@@ -118,16 +126,31 @@ class DiaryEngine:
             fallback = True
             # 검토 거절만 한 번 보정합니다. 통신/형식 오류는 기존 HTTP 오류로 전파합니다.
             def parse(stage, instruction, data, schema, attempt):
+                remaining = model_deadline - self.clock()
+                if remaining <= 0:
+                    logger.warning('diary outcome=budget_exhausted stage=%s attempt=%d', stage, attempt)
+                    return None
+                # 생성이 잔여 시간 전부를 차지하지 않도록 검토 시간도 남깁니다.
+                timeout = min(60.0, remaining / (2 if stage == 'generation' else 1))
                 try:
-                    return self.adapter.parse(instruction, data, schema)
+                    result = self.adapter.parse(instruction, data, schema, timeout=timeout)
                 except Exception:
                     # 대화, 후보, 키, 공급자 원본 오류를 로그에 남기지 않습니다.
                     logger.warning('diary outcome=%s_failed attempt=%d', stage, attempt)
                     raise
+                if self.clock() >= model_deadline:
+                    logger.warning('diary outcome=budget_exhausted stage=%s attempt=%d', stage, attempt)
+                    return None  # 늦게 도착한 후보/승인은 사용하거나 후속 호출하지 않습니다.
+                return result
 
             for attempt in (1, 2):
+                if attempt == 2 and model_deadline - self.clock() < DIARY_REPAIR_MIN_BUDGET:
+                    logger.warning('diary outcome=repair_skipped_budget attempt=2')
+                    break
                 instruction = DIARY_PROMPT if attempt == 1 else DIARY_PROMPT + '\n' + DIARY_REPAIR
                 candidate = parse('generation', instruction, payload, DiaryCandidate, attempt)
+                if candidate is None:
+                    break
                 if not (0 < len(candidate.sentences) <= 20 and all(
                         sentence.text.strip() and len(sentence.text) <= 500
                         for sentence in candidate.sentences)):
@@ -140,6 +163,8 @@ class DiaryEngine:
                 review = parse('review', DIARY_REVIEW,
                                {'conversation': conversation, 'sources': sources,
                                 'candidate': candidate.model_dump()}, Review, attempt)
+                if review is None:
+                    break
                 if review.accepted:
                     sentences = [sentence.model_dump() for sentence in candidate.sentences]
                     fallback = False

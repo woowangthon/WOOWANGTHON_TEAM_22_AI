@@ -1,5 +1,7 @@
 # 실제 일기 초안 원문 나열 원인 분석 및 수정 — 2026-11-09
 
+> 이후 추가 수정: [100초 요청 시간 예산](DIARY_TIME_BUDGET.md)을 적용했다. 아래 4회 순차 대기 및 timeout 협의 설명은 최초 수정 기록이며, 현재 일기 API는 BE·FE 제한을 늘리지 않고 전체 예산 안에서 처리한다.
+
 시작 상태는 `main`, HEAD `5395d90aba1e91f1575342a34b5120e496ed7001`, 미커밋 변경 없음이었다. 저장소와 상위 경로에서 적용할 `AGENTS.md`는 발견되지 않았다. `README.md`, `API_CONTRACT.md`, `BE_HANDOFF.md`, `MULTI_PROVIDER_SETUP.md`, `REQUIREMENTS_AUDIT.md`, 기존 실제 테스트 결과를 확인했다. `.env`와 모델 선택은 수정하지 않았다.
 
 ## 확인된 원인과 확인 범위

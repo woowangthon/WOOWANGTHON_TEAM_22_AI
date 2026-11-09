@@ -90,9 +90,11 @@ class ProviderRouter:
         name = 'GROQ_API_KEY' if self.text_provider == 'groq' else 'OPENAI_API_KEY'
         return bool(setting(name))
 
-    def parse(self, instruction, payload, schema):
+    def parse(self, instruction, payload, schema, *, timeout=None):
         provider = self.text_provider
         client = getattr(self, provider)
+        if timeout is not None:
+            client = client.with_options(timeout=timeout, max_retries=0)
         try:
             if provider == 'openai':
                 response = client.responses.parse(

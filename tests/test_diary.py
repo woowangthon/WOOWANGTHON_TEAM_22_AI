@@ -9,7 +9,7 @@ class FakeAdapter:
         self.answers = list(answers)
         self.calls = []
         self.instructions = []
-    def parse(self, instruction, payload, schema):
+    def parse(self, instruction, payload, schema, *, timeout=None):
         self.calls.append((payload, schema))
         self.instructions.append(instruction)
         answer = self.answers.pop(0)

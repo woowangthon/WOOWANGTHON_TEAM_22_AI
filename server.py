@@ -3,6 +3,9 @@
 FE 화면, 사용자 인증, 일기 저장 및 조회는 이 서비스의 담당 범위가 아닙니다.
 """
 import os
+import logging
+from functools import partial
+import anyio
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -12,7 +15,7 @@ from fastapi.responses import JSONResponse, Response
 from openai import OpenAIError
 from pydantic import ValidationError
 
-from engine import DiaryEngine, GenerationError
+from engine import DiaryEngine, GenerationError, DIARY_REQUEST_BUDGET, DIARY_RESPONSE_RESERVE
 from models import (ConversationRequest, ImageRequest, QuestionResponse,
                     DiaryResponse, ImageResponse, StatusResponse,
                     SpeechRequest, TranscriptionResponse, VoiceReplyResponse)
@@ -71,9 +74,18 @@ def create_app(engine=None):
         return engine.next_question(body.messages)
 
     @app.post('/api/diary', response_model=DiaryResponse)
-    def diary(body: ConversationRequest):
+    async def diary(body: ConversationRequest):
         # 날짜·사용자 ID·DB 저장은 BE가 담당합니다.
-        return engine.make_diary(body.messages)
+        deadline = engine.clock() + DIARY_REQUEST_BUDGET
+        # SDK timeout은 HTTP 단계별 제한이므로 느린 분할 응답까지 막는 별도 벽시계 제한입니다.
+        # 스레드 큐 대기도 포함하며 JSON 직렬화·fallback에 시간을 남깁니다.
+        with anyio.move_on_after(DIARY_REQUEST_BUDGET - DIARY_RESPONSE_RESERVE / 2) as scope:
+            result = await anyio.to_thread.run_sync(
+                partial(engine.make_diary, body.messages, deadline=deadline), abandon_on_cancel=True)
+        if scope.cancel_called:
+            logging.getLogger(__name__).warning('diary outcome=request_budget_exhausted')
+            return engine.make_diary(body.messages, deadline=engine.clock())
+        return result
 
     @app.post('/api/image', response_model=ImageResponse)
     def image(body: ImageRequest):

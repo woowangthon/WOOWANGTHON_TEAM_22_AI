@@ -8,7 +8,7 @@ from visual_story import text_hash
 
 
 class DiaryAdapter:
-    def parse(self, instruction, payload, schema):
+    def parse(self, instruction, payload, schema, *, timeout=None):
         if schema is Review:
             return Review(accepted=True)
         return DiaryCandidate(sentences=[Sentence(text='블록을 쌓았다.', source_ids=[1])])
@@ -46,7 +46,7 @@ def test_mixed_scene_outcomes_preserve_previous_success():
 
 def test_provider_failure_is_not_reported_as_diary_fallback():
     class Adapter:
-        def parse(self, *args):
+        def parse(self, *args, **kwargs):
             raise ProviderError('test quota exceeded')
     with TestClient(create_app(DiaryEngine(Adapter()))) as client:
         response = client.post('/api/diary', json={'messages': [{'role': 'child', 'text': '블록을 쌓았다.'}]})
@@ -56,7 +56,7 @@ def test_provider_failure_is_not_reported_as_diary_fallback():
 
 def test_explicit_finish_does_not_call_provider_even_when_unavailable():
     class Unavailable:
-        def parse(self, *args):
+        def parse(self, *args, **kwargs):
             raise AssertionError('Explicit finish should not call a model')
     for mock in (True, False):
         with TestClient(create_app(DiaryEngine(Unavailable(), mock=mock))) as client:
@@ -71,7 +71,7 @@ def test_explicit_finish_does_not_call_provider_even_when_unavailable():
 def test_negated_or_quoted_finish_is_not_treated_as_stop():
     from models import QuestionCandidate
     class Adapter:
-        def parse(self, instruction, payload, schema):
+        def parse(self, instruction, payload, schema, *, timeout=None):
             return Review(accepted=True) if schema is Review else QuestionCandidate(question='더 이야기해 줄래?', finished=False)
     with TestClient(create_app(DiaryEngine(Adapter()))) as client:
         for text in ('그만하고 싶지 않아.', '친구가 그만할래라고 했어.', '그만할래? 아니 계속할래.'):
@@ -93,7 +93,7 @@ def test_sixty_messages_keep_original_indices_and_at_most_six_pages():
 
 def test_twenty_generated_sentences_are_all_preserved():
     class Adapter:
-        def parse(self, instruction, payload, schema):
+        def parse(self, instruction, payload, schema, *, timeout=None):
             if schema is Review:
                 return Review(accepted=True)
             return DiaryCandidate(sentences=[Sentence(text=f'{i}번째 일을 했다.', source_ids=[i]) for i in range(20)])
