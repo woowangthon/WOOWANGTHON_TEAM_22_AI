@@ -14,6 +14,7 @@ from openai import OpenAI, OpenAIError
 from pydantic import Field, ValidationError
 
 from engine import ProviderError
+from diagnostics import failure_details
 from models import StrictModel, Review
 
 
@@ -29,7 +30,7 @@ def setting(name, default=''):
 def required(name):
     value = setting(name)
     if not value:
-        raise ProviderError(f'.env의 {name}을 설정하고 서버를 다시 실행해 주세요.')
+        raise ProviderError(f'.env의 {name}을 설정하고 서버를 다시 실행해 주세요.', reason='configuration')
     return value
 
 
@@ -53,7 +54,8 @@ def provider_failure(provider, error):
         message = '응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.'
     else:
         message = '연결에 실패했습니다. 네트워크와 제공업체 상태를 확인해 주세요.'
-    return ProviderError(f'{provider}: {message}')
+    reason, safe_status, _ = failure_details(error)
+    return ProviderError(f'{provider}: {message}', reason=reason, status_code=safe_status, provider=provider)
 
 
 class ProviderRouter:
@@ -103,7 +105,8 @@ class ProviderRouter:
                            {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)}],
                     text_format=schema, store=False)
                 if response.output_parsed is None:
-                    raise ProviderError('AI 응답이 비어 있습니다. 다시 시도해 주세요.')
+                    raise ProviderError('AI 응답이 비어 있습니다. 다시 시도해 주세요.',
+                                        reason='empty_response', provider=provider)
                 return response.output_parsed
             response = client.chat.completions.create(
                 model=setting('GROQ_TEXT_MODEL', 'openai/gpt-oss-20b'),
@@ -113,12 +116,21 @@ class ProviderRouter:
                     'name': schema.__name__, 'strict': True, 'schema': schema.model_json_schema()}},
                 max_completion_tokens=2048)
             if not response.choices or response.choices[0].finish_reason != 'stop':
-                raise ProviderError('AI 응답이 완성되지 않았습니다. 대화를 짧게 나누어 주세요.')
-            return schema.model_validate_json(response.choices[0].message.content or '')
+                finish = response.choices[0].finish_reason if response.choices else None
+                reason = {'length': 'response_truncated', 'content_filter': 'response_filtered'}.get(
+                    finish, 'response_incomplete')
+                raise ProviderError('AI 응답이 완성되지 않았습니다. 대화를 짧게 나누어 주세요.',
+                                    reason=reason, provider=provider)
+            content = response.choices[0].message.content
+            if not content or not content.strip():
+                raise ProviderError('AI 응답이 비어 있습니다. 다시 시도해 주세요.',
+                                    reason='empty_response', provider=provider)
+            return schema.model_validate_json(content)
         except OpenAIError as error:
             raise provider_failure(provider, error) from None
         except ValidationError:
-            raise ProviderError('AI 응답 형식을 확인하지 못했습니다. 다시 시도해 주세요.') from None
+            raise ProviderError('AI 응답 형식을 확인하지 못했습니다. 다시 시도해 주세요.',
+                                reason='response_schema_invalid', provider=provider) from None
 
     def transcribe(self, audio_bytes, extension, mime_type):
         provider = self.stt_provider

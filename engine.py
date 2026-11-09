@@ -5,6 +5,8 @@ from image_data import image_data_url
 import os
 import re
 import time
+from uuid import uuid4
+from diagnostics import failure_details
 from functools import cached_property
 from openai import OpenAI
 from models import QuestionCandidate, DiaryCandidate, Review
@@ -20,6 +22,11 @@ class GenerationError(Exception):
 
 class ProviderError(GenerationError):
     """공급자 연결 계층이 만든 공개 가능한 고정 오류 안내입니다."""
+    def __init__(self, message, *, reason='provider_error', status_code=None, provider=None):
+        super().__init__(message)
+        self.reason = reason
+        self.status_code = status_code
+        self.provider = provider
 
 class OpenAIAdapter:
     @cached_property
@@ -111,7 +118,17 @@ class DiaryEngine:
         return {'question':candidate.question if accepted else replacement,
                 'finished':candidate.finished if accepted else False, 'mock':False, 'fallback':not accepted}
 
-    def make_diary(self, messages, *, deadline=None):
+    def make_diary(self, messages, *, deadline=None, request_id=None):
+        # 클라이언트 헤더나 대화 내용에서 ID를 가져오지 않습니다.
+        if not isinstance(request_id, str) or not re.fullmatch(r'[0-9a-f]{32}', request_id):
+            request_id = uuid4().hex
+
+        def log(level, outcome, attempt, stage='none', error=None):
+            reason, status, provider = failure_details(error) if error is not None else ('none', None, 'unknown')
+            getattr(logger, level)(
+                'diary outcome=%s attempt=%d request_id=%s stage=%s reason=%s provider=%s status=%s',
+                outcome, attempt, request_id, stage, reason, provider, status if status is not None else 'none')
+
         deadline = self.clock() + DIARY_REQUEST_BUDGET if deadline is None else deadline
         model_deadline = deadline - DIARY_RESPONSE_RESERVE
         conversation = self.conversation_data(messages)
@@ -128,24 +145,24 @@ class DiaryEngine:
             def parse(stage, instruction, data, schema, attempt):
                 remaining = model_deadline - self.clock()
                 if remaining <= 0:
-                    logger.warning('diary outcome=budget_exhausted stage=%s attempt=%d', stage, attempt)
+                    log('warning', 'budget_exhausted', attempt, stage)
                     return None
                 # 생성이 잔여 시간 전부를 차지하지 않도록 검토 시간도 남깁니다.
                 timeout = min(60.0, remaining / (2 if stage == 'generation' else 1))
                 try:
                     result = self.adapter.parse(instruction, data, schema, timeout=timeout)
-                except Exception:
+                except Exception as error:
                     # 대화, 후보, 키, 공급자 원본 오류를 로그에 남기지 않습니다.
-                    logger.warning('diary outcome=%s_failed attempt=%d', stage, attempt)
+                    log('warning', stage + '_failed', attempt, stage, error)
                     raise
                 if self.clock() >= model_deadline:
-                    logger.warning('diary outcome=budget_exhausted stage=%s attempt=%d', stage, attempt)
+                    log('warning', 'budget_exhausted', attempt, stage)
                     return None  # 늦게 도착한 후보/승인은 사용하거나 후속 호출하지 않습니다.
                 return result
 
             for attempt in (1, 2):
                 if attempt == 2 and model_deadline - self.clock() < DIARY_REPAIR_MIN_BUDGET:
-                    logger.warning('diary outcome=repair_skipped_budget attempt=2')
+                    log('warning', 'repair_skipped_budget', 2)
                     break
                 instruction = DIARY_PROMPT if attempt == 1 else DIARY_PROMPT + '\n' + DIARY_REPAIR
                 candidate = parse('generation', instruction, payload, DiaryCandidate, attempt)
@@ -154,11 +171,11 @@ class DiaryEngine:
                 if not (0 < len(candidate.sentences) <= 20 and all(
                         sentence.text.strip() and len(sentence.text) <= 500
                         for sentence in candidate.sentences)):
-                    logger.warning('diary outcome=candidate_validation_failed attempt=%d', attempt)
+                    log('warning', 'candidate_validation_failed', attempt, 'generation')
                     break
                 if not all(sentence.source_ids and set(sentence.source_ids) <= allowed_ids
                            for sentence in candidate.sentences):
-                    logger.warning('diary outcome=source_validation_failed attempt=%d', attempt)
+                    log('warning', 'source_validation_failed', attempt, 'generation')
                     break
                 review = parse('review', DIARY_REVIEW,
                                {'conversation': conversation, 'sources': sources,
@@ -168,9 +185,9 @@ class DiaryEngine:
                 if review.accepted:
                     sentences = [sentence.model_dump() for sentence in candidate.sentences]
                     fallback = False
-                    logger.info('diary outcome=accepted attempt=%d', attempt)
+                    log('info', 'accepted', attempt, 'review')
                     break
-                logger.warning('diary outcome=review_rejected attempt=%d', attempt)
+                log('warning', 'review_rejected', attempt, 'review')
                 payload = {'conversation': conversation, 'sources': sources,
                            'previous_candidate': candidate.model_dump()}
         if fallback:

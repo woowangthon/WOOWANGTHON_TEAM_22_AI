@@ -1,6 +1,7 @@
 """Fake clocks and providers: no real models, sleeps of 100 seconds, or paid calls."""
 import threading
 import time
+import re
 
 import httpx
 import pytest
@@ -152,6 +153,9 @@ def test_http_watchdog_returns_before_blocking_provider_finishes(monkeypatch, ca
         assert finished.wait(2)
     assert len(calls) == 1  # Late generation must not start review after deadline.
     assert 'outcome=request_budget_exhausted' in caplog.text
+    entries = [r.getMessage() for r in caplog.records if r.name in ('engine', 'server')]
+    ids = {re.search(r'request_id=([0-9a-f]{32})', entry).group(1) for entry in entries}
+    assert len(ids) == 1  # Watchdog, fallback and abandoned worker belong to one request.
     assert all(m.text not in caplog.text for m in MESSAGES)
 
 
