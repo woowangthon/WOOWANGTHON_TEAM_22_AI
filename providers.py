@@ -5,6 +5,8 @@ from prompts import TTS_INSTRUCTIONS
 import binascii
 import json
 import os
+import logging
+import time
 import re
 from functools import cached_property
 
@@ -196,31 +198,143 @@ class ProviderRouter:
             raise ProviderError('CLOUDFLARE_ACCOUNT_ID에는 32자리 계정 ID를 입력해 주세요.')
         return token, account
 
-    def _cloudflare_image(self, prompt):
+    def _cloudflare_request(self, model, payload, *, deadline):
+        """180초 총 예산 안에서 일시적 서버 오류만 1회 재시도합니다."""
         token, account = self._cloudflare_credentials()
+        for attempt in range(2):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ProviderError('Cloudflare: 응답 시간이 초과되었습니다.', reason='timeout', provider='cloudflare')
+            try:
+                with HTTPClient(timeout=remaining, follow_redirects=False) as client:
+                    response = client.post(f'https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}',
+                                           headers={'Authorization': 'Bearer ' + token}, json=payload)
+                try:
+                    body = response.json()
+                except ValueError:
+                    body = {}
+                if not isinstance(body, dict):
+                    body = {}
+                # 숫자 오류 코드만 기록합니다. 키·원문·공급자의 오류 메시지는 기록하지 않습니다.
+                errors = body.get('errors', [])
+                codes = [item['code'] for item in errors if isinstance(item, dict)
+                         and type(item.get('code')) is int] if isinstance(errors, list) else []
+                if response.is_error or body.get('success') is False:
+                    logging.getLogger(__name__).warning('cloudflare status=%s codes=%s', response.status_code, codes)
+                    if response.status_code in (502, 503, 504) and attempt == 0 and remaining > 3:
+                        time.sleep(1)
+                        continue
+                    messages = ' '.join(item.get('message', '') for item in errors
+                                        if isinstance(item, dict) and isinstance(item.get('message'), str)) if isinstance(errors, list) else ''
+                    if any(term in messages.lower() for term in ('nsfw', 'content safety', 'safety filter')):
+                        raise ProviderError('Cloudflare 안전 필터가 그림 생성을 거절했습니다. 자동 재시도하지 않습니다.',
+                                            reason='response_filtered', status_code=response.status_code, provider='cloudflare')
+                    safe = type('Status', (), {'status_code': response.status_code})()
+                    error = provider_failure('cloudflare', safe)
+                    if codes:
+                        error.args = (str(error) + ' (오류 코드: ' + ','.join(map(str, codes[:3])) + ')',)
+                    raise error
+                return body.get('result', {})
+            except httpx.RequestError as error:
+                raise provider_failure('cloudflare', error) from None
+        raise ProviderError('Cloudflare: 그림 생성에 실패했습니다.')
+
+    def _cloudflare_translate(self, text, *, deadline):
+        """그림 모델용 한국어→영어 번역. 새 Groq 키나 호출은 필요하지 않습니다."""
+        if not re.search(r'[가-힣]', text):
+            return text
+        result = self._cloudflare_request('@cf/meta/m2m100-1.2b',
+            {'text': text, 'source_lang': 'ko', 'target_lang': 'en'}, deadline=deadline)
+        translated = result.get('translated_text') if isinstance(result, dict) else None
+        if not isinstance(translated, str) or not translated.strip():
+            raise ProviderError('Cloudflare: 장면 번역 응답이 비어 있습니다.')
+        return translated.strip()
+
+    def _cloudflare_scene_specs(self, captions, *, deadline):
+        """번역 4회 대신 Cloudflare에서 원문 근거가 있는 시각 명세를 1회 작성합니다."""
+        from scene_prompting import SCENE_PROMPT, SceneSpecs, validate_specs
+        schema = SceneSpecs.model_json_schema()
+        # 근거 문장을 요약/재작성하지 못하도록 실제 원문을 열거형으로 제한합니다.
+        for field in ('source_quote', 'action_quote'):
+            schema['$defs']['SceneSpec']['properties'][field]['enum'] = list(dict.fromkeys(captions))
+        result = self._cloudflare_request(
+            setting('CLOUDFLARE_SCENE_MODEL', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'),
+            {'messages': [{'role': 'system', 'content': SCENE_PROMPT},
+                          {'role': 'user', 'content': json.dumps({'captions': captions}, ensure_ascii=False)}],
+             'max_tokens': 2200, 'temperature': 0.1, 'response_format': {'type': 'json_schema', 'json_schema': schema}},
+            deadline=min(deadline, time.monotonic() + 55))
+        try:
+            choices = result.get('choices') if isinstance(result, dict) else None
+            if choices:
+                if choices[0].get('finish_reason') != 'stop':
+                    raise ValueError('incomplete scene response')
+                content = choices[0]['message']['content']
+            else:
+                content = result.get('response') if isinstance(result, dict) else None
+            if isinstance(content, dict):
+                parsed = content
+            elif isinstance(content, str):
+                parsed = json.loads(content)
+            else:
+                raise ValueError('empty scene response')
+        except (ValueError, KeyError, TypeError, IndexError):
+            raise ProviderError('Cloudflare 장면 명세 응답이 완성되지 않았습니다. 일기 글은 유지됩니다.',
+                                reason='response_schema_invalid', provider='cloudflare') from None
+        return validate_specs(parsed, captions)
+
+    def _cloudflare_review_scene(self, scene, data_url, captions, *, reference=None, deadline):
+        """Cloudflare 안에서만 실제 픽셀을 검사합니다. 검사가 실패하면 통과시키지 않습니다."""
+        from comic_review import REVIEW_PROMPT, ImageChecks, parse_checks
+        content = [{'type': 'text', 'text': 'CURRENT image. Original diary and current scene: ' +
+                    json.dumps({'captions': captions, 'scene': scene.model_dump()}, ensure_ascii=False)},
+                   {'type': 'image_url', 'image_url': {'url': data_url}}]
+        if reference:
+            content.extend([{'type': 'text', 'text': 'REFERENCE for narrator appearance only.'},
+                            {'type': 'image_url', 'image_url': {'url': reference}}])
+        review_schema = ImageChecks.model_json_schema()
+        review_schema['properties']['object_counts'].update(minItems=len(scene.objects),maxItems=len(scene.objects))
+        result = self._cloudflare_request(
+            setting('CLOUDFLARE_COMIC_REVIEW_MODEL', '@cf/meta/llama-4-scout-17b-16e-instruct'),
+            {'messages': [{'role': 'system', 'content': REVIEW_PROMPT},
+                          {'role': 'user', 'content': content}],
+             'temperature': 0, 'max_tokens': 350, 'response_format': {'type': 'json_schema', 'json_schema': review_schema}},
+            deadline=min(deadline, time.monotonic() + 35))
+        try:
+            choices = result.get('choices') if isinstance(result, dict) else None
+            if choices:
+                if choices[0].get('finish_reason') != 'stop':
+                    raise ValueError('incomplete review')
+                content = choices[0]['message']['content']
+            else:
+                content = result.get('response') if isinstance(result, dict) else None
+            value = json.loads(content) if isinstance(content, str) else content
+            return parse_checks(value, scene)
+        except (ValueError, TypeError, KeyError, IndexError):
+            raise ProviderError('Cloudflare 그림 품질 검사 응답이 완성되지 않았습니다. 그림은 표시하지 않습니다.',
+                                reason='response_schema_invalid', provider='cloudflare') from None
+
+    @cached_property
+    def comic_images(self):
+        from comic_images import ComicImages
+        return ComicImages(self)
+
+    def generate_comic_panel(self, captions, index):
+        return self.comic_images.panel(captions, index)
+
+    def _cloudflare_image(self, prompt, *, deadline=None):
         model = setting('CLOUDFLARE_IMAGE_MODEL', '@cf/black-forest-labs/flux-1-schnell')
         if model != '@cf/black-forest-labs/flux-1-schnell':
             raise ProviderError('현재 Cloudflare 이미지 연결은 FLUX.1 schnell 모델을 지원합니다.')
+        if not isinstance(prompt, str) or not 1 <= len(prompt) <= 2048:
+            raise ProviderError('Cloudflare 그림 입력 한도를 확인해 주세요.', reason='invalid_request')
+        result = self._cloudflare_request(model, {'prompt': prompt, 'steps': 8},
+                                          deadline=deadline if deadline is not None else time.monotonic() + 180)
+        encoded = result.get('image') if isinstance(result, dict) else None
+        if not isinstance(encoded, str) or not encoded:
+            raise ProviderError('Cloudflare: 그림 응답이 비어 있습니다.')
         try:
-            with HTTPClient(timeout=180, follow_redirects=False) as client:
-                response = client.post(f'https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}',
-                                       headers={'Authorization': 'Bearer ' + token},
-                                       json={'prompt': prompt, 'steps': 4})
-                response.raise_for_status()
-                body = response.json()
-            if body.get('success') is False:
-                raise ProviderError('Cloudflare: 그림 생성에 실패했습니다. 토큰 권한과 무료 한도를 확인해 주세요.')
-            encoded = body.get('result', {}).get('image')
-            if not isinstance(encoded, str) or not encoded:
-                raise ProviderError('Cloudflare: 그림 응답이 비어 있습니다.')
             return image_data_url(encoded)
-        except httpx.HTTPStatusError as error:
-            # HTTPStatusError에는 응답 본문을 출력하지 않습니다.
-            safe = type('Status', (), {'status_code': error.response.status_code})()
-            raise provider_failure('cloudflare', safe) from None
-        except httpx.RequestError as error:
-            raise provider_failure('cloudflare', error) from None
-        except (ValueError, binascii.Error, AttributeError):
+        except (ValueError, binascii.Error):
             raise ProviderError('Cloudflare: 그림 응답 형식을 확인하지 못했습니다.') from None
 
     def _review_image(self, image_url, instruction, payload):

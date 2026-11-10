@@ -116,17 +116,29 @@ def test_cloudflare_plan_and_images_never_call_groq_or_openai(router,monkeypatch
         raise AssertionError('Cloudflare generation must not call a text or vision model')
     monkeypatch.setattr(router,'parse',forbidden)
     monkeypatch.setattr(router,'_review_image',forbidden)
+    monkeypatch.setattr('comic_images.has_lettering', lambda data:False)
     calls=[]
     original_client=httpx.Client
     def handler(request):
         assert request.url.host=='api.cloudflare.com'
         assert request.headers['authorization']=='Bearer cf-test'
         body=json.loads(request.read())
-        assert len(body['prompt'])<=2048 and body['steps']==4
-        source=json.loads(body['prompt'].split('\n',1)[1])
-        assert source['selected_text']
-        calls.append(source)
-        return httpx.Response(200,json={'success':True,'result':{'image':encoded_image('JPEG')}})
+        if 'messages' in body and isinstance(body['messages'][1]['content'],list):
+            return httpx.Response(200,json={'success':True,'result':completion({**{name:True for name in ('objects','action','appearance','grounding','lettering','composition','character')},'object_counts':[1]})})
+        if 'messages' in body:
+            captions=json.loads(body['messages'][1]['content'])['captions']
+            specs={'scenes':[{'index':i,'source_quote':caption,'objects':[{'name':'blocks','source_quote':caption}],
+                             'action':'The narrator stacks blocks.','action_quote':caption,'mode':'actual'}
+                            for i,caption in enumerate(captions)]}
+            return httpx.Response(200,json={'success':True,'result':completion(specs)})
+        assert len(body['prompt'])<=2048 and body['steps']==8
+        if kind=='storybook':assert json.loads(body['prompt'].split('\n',1)[1])['selected_text']
+        else:assert 'Main visible objects: blocks' in body['prompt']
+        calls.append(body['prompt'])
+        from PIL import Image
+        import io
+        stream=io.BytesIO();Image.new('RGB',(512,512),'white').save(stream,format='JPEG')
+        return httpx.Response(200,json={'success':True,'result':{'image':base64.b64encode(stream.getvalue()).decode()}})
     monkeypatch.setattr('providers.HTTPClient',lambda **kw:original_client(
         **kw,transport=httpx.MockTransport(handler)))
     text='집에서 블록을 쌓았다. 탑이 무너졌다. 밑을 넓게 만들었다. 다시 쌓았다. 탑이 완성되었다. 기뻤다.'

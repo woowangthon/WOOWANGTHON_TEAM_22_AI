@@ -1,5 +1,5 @@
 import {Conversation,TurnDetector} from '/dev/voice/core.mjs';
-import {IllustratedDiary,isImageDataURL,comicDialogue} from '/dev/voice/illustration.mjs';
+import {IllustratedDiary,isImageDataURL,comicBubble} from '/dev/voice/illustration.mjs';
 import {DrawingPad,drawingDiaryHTML} from '/dev/voice/drawing.mjs';
 
 const $=id=>document.getElementById(id);
@@ -257,8 +257,8 @@ function renderPictures(state){
     const card=document.createElement('article');card.className='picture-page';
     const title=document.createElement('h3');title.textContent=`${index+1}컷${scene.repeated?' · 같은 장면':''}`;card.append(title);
     if(scene.status==='generated'&&isImageDataURL(scene.imageUrl)){
-      const line=comicDialogue(scene.caption);
-      if(line){const bubble=document.createElement('p');bubble.className='comic-dialogue';bubble.textContent=line;card.append(bubble);}
+      const line=comicBubble(scene.caption,state.childSources);
+      if(line){const bubble=document.createElement('p');bubble.className='comic-dialogue comic-'+line.kind;bubble.setAttribute('aria-label',line.kind==='thought'?'아이의 생각':'아이가 한 말');bubble.textContent=line.text;card.append(bubble);}
       const image=document.createElement('img');image.src=scene.imageUrl;image.alt=scene.caption;image.loading='lazy';card.append(image);
     }else{
       const placeholder=document.createElement('div');placeholder.className='picture-placeholder';
@@ -291,7 +291,7 @@ async function makeComic(){
   stop('4컷 만화를 준비하고 있어요.');const version=revision;clearError();
   setPhase('illustrating','확인한 일기로 4컷 만화를 만들고 있어요.');
   try{
-    const result=await illustrator.build(composed.text,4,'comic4');
+    const result=await illustrator.build(composed.text,4,'comic4',{childSources:conversation.messages.filter(message=>message.role==='child').map(message=>message.text)});
     if(version!==revision||!result)return;
     const generated=result.scenes.filter(scene=>scene.status==='generated').length;
     setPhase('done',generated===4?'4컷 만화가 준비됐어요. 그림일기와 함께 확인해 주세요.':'내 그림일기는 그대로 있어요. 실패한 만화 컷만 다시 만들 수 있어요.');
