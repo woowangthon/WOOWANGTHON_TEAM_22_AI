@@ -2,6 +2,22 @@
 export const isImageDataURL=value=>typeof value==='string'&&/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/.test(value);
 export const escapeHTML=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
+// 일기에 적힌 직접 인용을 우선하고, 없으면 짧은 완결 문장을 그대로 표시합니다.
+// 새 대사나 감정을 만들어 넣지 않으며 긴 문장을 중간에서 자르지 않습니다.
+export function comicDialogue(caption){
+  const text=String(caption||'').trim();
+  const quote=text.match(/“([^”\n]{1,60})”|「([^」\n]{1,60})」|"([^"\n]{1,60})"/u);
+  if(quote)return quote[1]||quote[2]||quote[3];
+  const first=text.match(/^.*?[.!?。](?=\s|$)/u)?.[0]||text;
+  return first.length<=60?first:'';
+}
+export function comicArtworkHTML(scene){
+  if(!isImageDataURL(scene.imageUrl))return `<p class="note">${escapeHTML(scene.error||'그림이 아직 생성되지 않았습니다.')}</p>`;
+  const line=comicDialogue(scene.caption);
+  return `<div class="comic-art">${line?`<p class="comic-dialogue">${escapeHTML(line)}</p>`:''}<img src="${scene.imageUrl}" alt="${escapeHTML(scene.caption)}"></div>`;
+}
+export const COMIC_DIALOGUE_CSS='.comic-dialogue{position:relative;box-sizing:border-box;background:#fffef7;color:#493c32;border:2px solid #68513f;border-radius:18px;padding:10px 14px;margin:8px 8px 14px;font-size:15px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}.comic-dialogue:after{content:"";position:absolute;bottom:-8px;left:24px;width:12px;height:12px;background:#fffef7;border-right:2px solid #68513f;border-bottom:2px solid #68513f;transform:rotate(45deg)}';
+
 export class IllustratedDiary {
   constructor(request,onChange=()=>{}){this.request=request;this.onChange=onChange;this.state=null;this.busy=false;this.version=0;}
   cancel(){
@@ -90,10 +106,9 @@ export class IllustratedDiary {
     if(!this.state)throw new Error('먼저 그림일기를 만들어 주세요.');
     const {scenes,diary_text,created_at}=this.state;
     return `<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>그림일기</title>
-<style>body{font:18px/1.8 -apple-system,BlinkMacSystemFont,sans-serif;color:#273b30;background:#f4f5ef;margin:0}main{max-width:760px;margin:auto;padding:32px 20px}article{background:white;padding:24px;border:1px solid #d9e0d5;border-radius:14px;margin:24px 0;break-inside:avoid}img{display:block;width:100%;height:auto;border-radius:8px}p{white-space:pre-wrap;overflow-wrap:anywhere}.note{font-size:13px;color:#657364}@media print{body{background:white}article{break-after:page;border:0}summary{display:none}details>p{display:block}}</style>
-<main><h1>그림일기</h1><p class="note">출력 생성 시각: ${escapeHTML(created_at)} · 기록한 사건의 날짜를 뜻하지 않습니다.</p>
-${scenes.map((scene,i)=>`<article><h2>${i+1}번째 장면</h2>${isImageDataURL(scene.imageUrl)?`<img src="${scene.imageUrl}" alt="${escapeHTML(scene.caption)}">`:
-`<p class="note">${escapeHTML(scene.error||'그림이 아직 생성되지 않았습니다.')}</p>`}<p>${escapeHTML(scene.caption)}</p></article>`).join('')}
+<style>${COMIC_DIALOGUE_CSS}body{font:18px/1.8 -apple-system,BlinkMacSystemFont,sans-serif;color:#273b30;background:#f4f5ef;margin:0}main{max-width:760px;margin:auto;padding:32px 20px}article{background:white;padding:24px;border:1px solid #d9e0d5;border-radius:14px;margin:24px 0;break-inside:avoid}img{display:block;width:100%;height:auto;border-radius:8px}p{white-space:pre-wrap;overflow-wrap:anywhere}.note{font-size:13px;color:#657364}@media print{body{background:white}article{break-after:page;border:0}summary{display:none}details>p{display:block}}</style>
+<main><h1>${this.state.format==='comic4'?'AI 4컷 만화':'그림일기'}</h1><p class="note">출력 생성 시각: ${escapeHTML(created_at)} · 기록한 사건의 날짜를 뜻하지 않습니다.</p>
+<div style="${this.state.format==='comic4'?'display:grid;grid-template-columns:1fr 1fr;gap:16px':''}">${scenes.map((scene,i)=>`<article><h2>${i+1}번째 장면</h2>${this.state.format==='comic4'?comicArtworkHTML(scene):isImageDataURL(scene.imageUrl)?`<img src="${scene.imageUrl}" alt="${escapeHTML(scene.caption)}">`:`<p class="note">${escapeHTML(scene.error||'그림이 아직 생성되지 않았습니다.')}</p>`}<p>${escapeHTML(scene.caption)}</p></article>`).join('')}</div>
 <details><summary>일기 글 보기</summary><p>${escapeHTML(diary_text)}</p></details><p class="note">확인한 일기를 바탕으로 만든 AI 삽화입니다. 원문과 다른 부분이 없는지 확인해 주세요.</p></main></html>`;
   }
 }

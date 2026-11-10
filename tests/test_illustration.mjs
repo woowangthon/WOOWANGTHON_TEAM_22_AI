@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {IllustratedDiary,isImageDataURL} from '../devtools/voice/illustration.mjs';
+import {IllustratedDiary,isImageDataURL,comicDialogue,comicArtworkHTML} from '../devtools/voice/illustration.mjs';
 
 const image='data:image/png;base64,iVBORw0KGgo=';
 const plan={diary_text:'공놀이를 했다. 즐거웠다.',diary_hash:'a'.repeat(64),storybook:{notices:[],scenes:[
@@ -102,4 +102,13 @@ test('retry of failed repeated comic panel regenerates only its original panel',
   });
   await diary.build(text,4,'comic4');assert.ok(diary.state.scenes.every(s=>s.imageUrl===null));
   await diary.retry(3);assert.equal(calls,2);assert.ok(diary.state.scenes.every(s=>s.imageUrl===image));
+});
+
+test('comic dialogue preserves quoted source and never truncates or injects HTML',()=>{
+  assert.equal(comicDialogue('탑을 완성하고 “우와, 완성했어!”라고 말했다.'),'우와, 완성했어!');
+  assert.equal(comicDialogue('블록을 쌓았다. 재미있었다.'),'블록을 쌓았다.');
+  assert.equal(comicDialogue('가'.repeat(61)+'.'),'');
+  const html=comicArtworkHTML({caption:'“<script>”라고 말했다.',imageUrl:image});
+  assert.ok(html.includes('&lt;script&gt;'));assert.ok(!html.includes('<script>'));
+  assert.ok(!comicArtworkHTML({caption:'실패',imageUrl:null}).includes('comic-dialogue'));
 });

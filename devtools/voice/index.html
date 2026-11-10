@@ -3,31 +3,41 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>음성 대화 테스트</title>
+  <title>텍스트 대화 테스트</title>
   <link rel="stylesheet" href="/dev/voice/style.css">
   <script type="module" src="/dev/voice/app.js"></script>
 </head>
 <body>
 <main>
   <header><span class="tag">개발용 · 성인 팀원 테스트</span><a href="/docs">API 문서 ↗</a></header>
-  <h1>말로 하루를 이야기해 보세요</h1>
-  <p class="intro">AI가 한 번에 하나씩 질문해요. 말을 마치면 자동으로 인식하고, 확인한 내용으로 대화를 이어갑니다.</p>
+  <h1 id="page-title">글로 하루를 이야기해 보세요</h1>
+  <p id="page-intro" class="intro">답변을 글로 입력하면 AI가 앞의 이야기를 이어서 대화해요. 대화를 마치면 일기와 4컷 만화를 확인할 수 있어요.</p>
   <section class="panel controls" aria-label="대화 제어">
     <div class="status"><span id="light"></span><strong id="status" role="status" aria-live="polite">대화를 시작해 주세요</strong></div>
-    <meter id="level" min="0" max="0.12" value="0" aria-label="마이크 음량"></meter>
+    <meter hidden id="level" min="0" max="0.12" value="0" aria-label="마이크 음량"></meter>
     <div class="buttons">
-      <button id="start" class="primary">마이크로 대화 시작</button>
-      <button id="send-audio" disabled>말 끝났어</button>
-      <button id="resume" disabled>다시 말하기</button>
-      <button id="stop" disabled>일시정지 · 마이크 끄기</button>
+      <button hidden disabled id="start" class="primary">마이크로 대화 시작</button>
+      <button hidden id="send-audio" disabled>말 끝났어</button>
+      <button hidden id="resume" disabled>다시 말하기</button>
+      <button id="stop" disabled>요청 중지</button>
     </div>
-    <div class="options">
+    <div hidden id="voice-options" class="options">
       <label><input id="confirm-first" type="checkbox" checked> 인식한 글을 확인한 뒤 보내기</label>
-      <label><input id="read-aloud" type="checkbox" checked> 기기 음성으로 질문 읽기</label>
+      <label><input id="read-aloud" type="checkbox"> 기기 음성으로 질문 읽기</label>
       <label>말 끝 기다리기 <select id="silence"><option value="1800">1.8초</option><option value="3000" selected>3초</option><option value="5000">5초</option></select></label>
     </div>
-    <p id="voice-note" class="hint">파일 저장·선택 없이 마이크로 대화합니다. 인식과 질문 생성 중에는 잠시 기다려 주세요.</p>
+    <p id="voice-note" class="hint">텍스트 대화 시작을 누른 뒤 오늘 있었던 일을 입력해 주세요.</p>
     <p id="error" role="alert" hidden></p>
+  </section>
+  <section class="panel" aria-label="텍스트 대화">
+    <h2>글로 대화하기</h2>
+    <p class="hint">시작 버튼을 누른 뒤 답변을 입력하세요. Enter로 전송하고 Shift+Enter로 줄을 바꿉니다.</p>
+    <button id="text-start" type="button" class="primary">텍스트로 대화 시작 · 이어가기</button>
+    <form id="text-form">
+      <label for="text-input">오늘 있었던 일을 입력해 주세요.</label>
+      <textarea id="text-input" rows="3" maxlength="2000" disabled></textarea>
+      <button id="text-send" type="submit" class="primary" disabled>보내기</button>
+    </form>
   </section>
   <section id="draft-panel" class="panel" hidden>
     <h2>이렇게 말했나요?</h2>
@@ -36,8 +46,8 @@
     <div class="buttons"><button id="confirm" class="primary">이 내용으로 보내기</button><button id="discard">다시 녹음하기</button></div>
   </section>
   <section class="panel" aria-label="대화 내용">
-    <div class="section-heading"><h2>대화</h2><button id="replay" disabled>마지막 질문 다시 듣기</button></div>
-    <ol id="messages" aria-live="polite"><li class="empty">시작 버튼을 누르면 첫 질문을 들려드려요.</li></ol>
+    <div class="section-heading"><h2>대화</h2><button hidden id="replay" disabled>마지막 질문 다시 듣기</button></div>
+    <ol id="messages" aria-live="polite"><li class="empty">텍스트 대화 시작을 누르면 첫 질문이 나와요.</li></ol>
   </section>
   <div class="buttons bottom"><button id="diary" class="primary" disabled>대화 마치고 일기 쓰기</button><button id="download" disabled>대화 내려받기</button></div>
   <section id="diary-panel" class="panel" hidden>
@@ -76,7 +86,7 @@
     </div>
     <div class="buttons bottom"><button id="save-picture" disabled>그림일기 · 만화 파일 저장</button><button id="print-picture" disabled>인쇄 · PDF 저장</button></div>
   </section>
-  <footer>이 화면은 AI 연결 테스트용입니다. 녹음은 발화마다 전송하고, 새로고침하면 화면의 대화는 사라집니다. 날짜별 영구 저장은 BE 연결 후 제공됩니다.</footer>
+  <footer>이 화면은 텍스트 AI 연결 테스트용입니다. 입력한 글로 대화하며, 새로고침하면 화면의 대화는 사라집니다. 날짜별 영구 저장은 BE 연결 후 제공됩니다.</footer>
 </main>
 </body>
 </html>
