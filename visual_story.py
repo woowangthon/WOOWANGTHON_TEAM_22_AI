@@ -84,7 +84,7 @@ class VisualStoryService:
         mode = 'mock' if self.engine.mock else 'deterministic'
         cloudflare_only = getattr(self.engine.adapter, 'image_provider', None) == 'cloudflare'
         if cloudflare_only:
-            notices.append('원문 순서로 장면을 구성합니다. Cloudflare 이미지는 원문 일치 여부를 직접 확인해 주세요. 만화는 로컬 문자 검사를 거치지만 자동 의미 검토는 하지 않습니다. 만화는 원문 근거·사물·행동 명세를 확인한 뒤 장면별로 생성합니다. 네 장면이 모두 준비되면 반환하며 5분간 같은 결과를 재사용합니다. 개별 컷 재요청도 캐시 결과를 사용합니다.')
+            notices.append('원문 순서로 장면을 구성합니다. Cloudflare 이미지는 원문 일치 여부를 직접 확인해 주세요. 만화는 로컬 문자 검사와 Cloudflare 보조 시각 검사를 거칩니다. 통과한 컷은 바로 표시하며 5분간 재사용합니다. 검사에서 제외된 컷은 15초 뒤 해당 컷만 다시 만들 수 있습니다. 자동 검사는 완벽하지 않아 최종 확인이 필요합니다.')
         # Cloudflare 이미지 경로에서는 장면 계획에도 텍스트 모델을 호출하지 않습니다.
         if not self.engine.mock and not cloudflare_only and 1 < target < count:
             try:

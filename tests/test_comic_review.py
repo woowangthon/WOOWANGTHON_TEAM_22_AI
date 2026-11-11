@@ -33,7 +33,7 @@ def test_quality_rejection_retries_once_and_never_caches_unchecked_images(monkey
         def _cloudflare_review_scene(self,*a,**kw):return ['action']
     router=Router();images=ComicImages(router)
     assert [images.panel(['scene']*4,i) for i in range(4)]==[None]*4
-    assert router.images==2
+    assert router.images==8
 
 def test_review_error_is_not_an_unchecked_pass(monkeypatch):
     monkeypatch.setattr('comic_images.has_lettering',lambda data:False)
@@ -44,3 +44,27 @@ def test_review_error_is_not_an_unchecked_pass(monkeypatch):
 
 def test_retry_feedback_uses_only_fixed_criteria():
     assert 'PRIVATE' not in retry_hint(['PRIVATE','action'])
+
+
+def test_one_bad_panel_keeps_approved_panels_and_retry_only_bad_panel(monkeypatch):
+    monkeypatch.setattr('comic_images.has_lettering',lambda data:False)
+    now=[100.0]
+    monkeypatch.setattr('comic_images.time.monotonic',lambda:now[0])
+    class Router(FakeSceneRouter):
+        images=0
+        bad=True
+        def _cloudflare_image(self,*a,**kw):self.images+=1;return board()
+        def _cloudflare_review_scene(self,scene,*a,**kw):return ['action'] if scene.index==1 and self.bad else []
+    router=Router();images=ComicImages(router);captions=['scene']*4
+    results=[images.panel(captions,i) for i in range(4)]
+    assert [bool(x) for x in results]==[True,False,True,True]
+    assert router.images==5
+    assert images.panel(captions,1) is None and router.images==5
+    now[0]+=16;router.bad=False
+    assert images.panel(captions,1) and router.images==6
+    assert images.panel(captions,0)==results[0] and router.images==6
+
+
+def test_complex_scene_objects_are_not_forced_to_count_one():
+    item=scene();item.objects[0].name='family members'
+    assert parse_checks(checks(object_counts=[3]),item)==[]

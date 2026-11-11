@@ -52,15 +52,21 @@ def test_incomplete_scene_provider_output_is_safe(monkeypatch,finish,content):
     with pytest.raises(ProviderError):router._cloudflare_scene_specs(CAPTIONS,deadline=time.monotonic()+10)
 
 
-def test_provider_constrains_evidence_to_exact_original_captions(monkeypatch):
+def test_provider_restores_exact_original_captions_without_model_echo(monkeypatch):
     router=ProviderRouter();calls=[]
     def request(model,payload,**kw):
         calls.append((model,payload))
-        return {'response':candidate()}
+        drafts = candidate()
+        for scene in drafts['scenes']:
+            del scene['action_quote'], scene['source_quote']
+        return {'response': drafts}
     monkeypatch.setattr(router,'_cloudflare_request',request)
-    router._cloudflare_scene_specs(CAPTIONS,deadline=time.monotonic()+10)
+    plan = router._cloudflare_scene_specs(CAPTIONS,deadline=time.monotonic()+10)
     model,payload=calls[0]
     assert model=='@cf/meta/llama-3.3-70b-instruct-fp8-fast'
     assert payload['response_format']['type']=='json_schema'
     schema=payload['response_format']['json_schema']
-    assert schema['$defs']['SceneSpec']['properties']['action_quote']['enum']==CAPTIONS
+    fields = schema['$defs']['SceneDraft']['properties']
+    assert 'action_quote' not in fields and 'source_quote' not in fields
+    assert [scene.source_quote for scene in plan.scenes] == CAPTIONS
+    assert [scene.action_quote for scene in plan.scenes] == CAPTIONS

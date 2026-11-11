@@ -129,6 +129,8 @@ class ProviderRouter:
 
     def parse(self, instruction, payload, schema, *, timeout=None):
         provider = self.text_provider
+        from token_budget import compact_payload, completion_budget
+        instruction, payload = compact_payload(instruction, payload)
         client = getattr(self, provider)
         if timeout is not None:
             client = client.with_options(timeout=timeout, max_retries=0)
@@ -137,7 +139,7 @@ class ProviderRouter:
                 response = client.responses.parse(
                     model=setting('OPENAI_TEXT_MODEL', setting('TEXT_MODEL', 'gpt-4.1-mini')),
                     input=[{'role': 'system', 'content': instruction},
-                           {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)}],
+                           {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}],
                     text_format=schema, store=False)
                 if response.output_parsed is None:
                     raise ProviderError('AI 응답이 비어 있습니다. 다시 시도해 주세요.',
@@ -146,10 +148,10 @@ class ProviderRouter:
             response = client.chat.completions.create(
                 model=setting('GROQ_TEXT_MODEL', 'openai/gpt-oss-20b'),
                 messages=[{'role': 'system', 'content': instruction},
-                          {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)}],
+                          {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}],
                 response_format={'type': 'json_schema', 'json_schema': {
                     'name': schema.__name__, 'strict': True, 'schema': schema.model_json_schema()}},
-                max_completion_tokens=2048)
+                max_completion_tokens=completion_budget(schema))
             if not response.choices or response.choices[0].finish_reason != 'stop':
                 finish = response.choices[0].finish_reason if response.choices else None
                 reason = {'length': 'response_truncated', 'content_filter': 'response_filtered'}.get(
@@ -229,6 +231,14 @@ class ProviderRouter:
                     if any(term in messages.lower() for term in ('nsfw', 'content safety', 'safety filter')):
                         raise ProviderError('Cloudflare 안전 필터가 그림 생성을 거절했습니다. 자동 재시도하지 않습니다.',
                                             reason='response_filtered', status_code=response.status_code, provider='cloudflare')
+                    if response.status_code == 429 and any(code in (4006, 3036) for code in codes):
+                        quota_code = next(code for code in codes if code in (4006, 3036))
+                        raise ProviderError(
+                            'Cloudflare Workers AI의 일일 무료 사용량을 모두 사용했어요. '
+                            '한국 시간 오전 9시에 한도가 초기화된 뒤 다시 시도해 주세요. '
+                            f'(오류 코드: {quota_code})',
+                            reason='quota_exhausted', status_code=429, provider='cloudflare',
+                        )
                     safe = type('Status', (), {'status_code': response.status_code})()
                     error = provider_failure('cloudflare', safe)
                     if codes:
@@ -252,11 +262,8 @@ class ProviderRouter:
 
     def _cloudflare_scene_specs(self, captions, *, deadline):
         """번역 4회 대신 Cloudflare에서 원문 근거가 있는 시각 명세를 1회 작성합니다."""
-        from scene_prompting import SCENE_PROMPT, SceneSpecs, validate_specs
-        schema = SceneSpecs.model_json_schema()
-        # 근거 문장을 요약/재작성하지 못하도록 실제 원문을 열거형으로 제한합니다.
-        for field in ('source_quote', 'action_quote'):
-            schema['$defs']['SceneSpec']['properties'][field]['enum'] = list(dict.fromkeys(captions))
+        from scene_prompting import SCENE_PROMPT, SceneDrafts, validate_specs
+        schema = SceneDrafts.model_json_schema()
         result = self._cloudflare_request(
             setting('CLOUDFLARE_SCENE_MODEL', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'),
             {'messages': [{'role': 'system', 'content': SCENE_PROMPT},
@@ -280,13 +287,26 @@ class ProviderRouter:
         except (ValueError, KeyError, TypeError, IndexError):
             raise ProviderError('Cloudflare 장면 명세 응답이 완성되지 않았습니다. 일기 글은 유지됩니다.',
                                 reason='response_schema_invalid', provider='cloudflare') from None
-        return validate_specs(parsed, captions)
+        try:
+            drafts = SceneDrafts.model_validate(parsed)
+            if [scene.index for scene in drafts.scenes] != list(range(len(captions))):
+                raise ValueError('scene order')
+        except (ValueError, TypeError):
+            raise ProviderError('Cloudflare 장면 순서나 응답 형식을 확인하지 못했습니다.',
+                                reason='response_schema_invalid', provider='cloudflare') from None
+        # 컷 번호를 확인한 뒤 서버가 원문을 붙입니다. 모델에 같은 캡션을 두 번 쓰게 하지 않습니다.
+        return validate_specs({'scenes': [
+            {**scene.model_dump(), 'source_quote': captions[scene.index], 'action_quote': captions[scene.index]}
+            for scene in drafts.scenes
+        ]}, captions)
 
     def _cloudflare_review_scene(self, scene, data_url, captions, *, reference=None, deadline):
         """Cloudflare 안에서만 실제 픽셀을 검사합니다. 검사가 실패하면 통과시키지 않습니다."""
         from comic_review import REVIEW_PROMPT, ImageChecks, parse_checks
         content = [{'type': 'text', 'text': 'CURRENT image. Original diary and current scene: ' +
-                    json.dumps({'captions': captions, 'scene': scene.model_dump()}, ensure_ascii=False)},
+                    json.dumps({'captions': captions, 'scene': scene.model_dump(
+                        exclude={'source_quote', 'action_quote'}
+                    )}, ensure_ascii=False, separators=(',', ':'))},
                    {'type': 'image_url', 'image_url': {'url': data_url}}]
         if reference:
             content.extend([{'type': 'text', 'text': 'REFERENCE for narrator appearance only.'},
@@ -345,7 +365,7 @@ class ProviderRouter:
                 response = client.responses.parse(
                     model=setting('OPENAI_VISION_MODEL', 'gpt-4.1-mini'), text_format=Review, store=False,
                     input=[{'role': 'system', 'content': instruction}, {'role': 'user', 'content': [
-                        {'type': 'input_text', 'text': json.dumps(payload, ensure_ascii=False)},
+                        {'type': 'input_text', 'text': json.dumps(payload, ensure_ascii=False, separators=(',', ':'))},
                         {'type': 'input_image', 'image_url': image_url}]}])
                 if response.output_parsed is None:
                     raise ProviderError('그림 검토 응답이 비어 있습니다. 그림은 표시하지 않습니다.')
@@ -354,7 +374,7 @@ class ProviderRouter:
                 model=setting('GROQ_VISION_MODEL', 'qwen/qwen3.8-27b'),
                 messages=[{'role': 'system', 'content': instruction + '\nReturn JSON: {"accepted": boolean}.'},
                           {'role': 'user', 'content': [
-                              {'type': 'text', 'text': json.dumps(payload, ensure_ascii=False)},
+                              {'type': 'text', 'text': json.dumps(payload, ensure_ascii=False, separators=(',', ':'))},
                               {'type': 'image_url', 'image_url': {'url': image_url}}]}],
                 response_format={'type': 'json_object'}, max_completion_tokens=1024)
             if not response.choices or response.choices[0].finish_reason != 'stop':
@@ -376,7 +396,7 @@ class ProviderRouter:
             try:
                 response = self.openai.with_options(timeout=180).images.generate(
                     model=setting('OPENAI_IMAGE_MODEL', setting('IMAGE_MODEL', 'gpt-image-1.5')),
-                    prompt=instruction + '\n' + json.dumps(payload, ensure_ascii=False),
+                    prompt=instruction + '\n' + json.dumps(payload, ensure_ascii=False, separators=(',', ':')),
                     size='1024x1024', quality='low', output_format='png', n=1)
                 if not response.data or not response.data[0].b64_json:
                     raise ProviderError('그림 응답이 비어 있습니다.')

@@ -118,7 +118,7 @@ export class IllustratedDiary {
         scene.imageUrl=result.imageUrl;scene.status='generated';
       }else{
         scene.status=result.status==='rejected'?'rejected':'failed';scene.imageUrl=null;
-        scene.error=result.error||(result.status==='rejected'?'원문과 일치하는지 확인하지 못해 그림을 표시하지 않았어요.':
+        scene.error=result.error||(result.status==='rejected'?'이 컷이 그림 검사를 통과하지 못했어요. 다른 컷은 유지됩니다. 15초 뒤 이 컷만 다시 만들어 주세요.':
           result.status==='mock'?'체험 모드에서는 실제 그림을 만들지 않아요. 실제 AI 모드로 실행해 주세요.':'그림을 받지 못했어요. 키와 무료 한도를 확인해 주세요.');
       }
     }catch(error){if(version===this.version){scene.status='failed';scene.error=error.message;scene.imageUrl=null;}}

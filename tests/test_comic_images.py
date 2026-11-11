@@ -83,7 +83,7 @@ def test_expired_board_regenerates(monkeypatch):
         def _cloudflare_image(self,*args,**kw):self.count+=1;return board()
     router=Router();images=ComicImages(router);images.ttl=0
     images.panel(['블록']*4,0);images.panel(['블록']*4,0)
-    assert router.count==8
+    assert router.count==2
 
 
 @pytest.mark.parametrize('status,count',[(400,1),(401,1),(429,1),(503,2)])
@@ -116,7 +116,7 @@ def test_failed_board_is_not_repeated_for_each_panel():
     assert all('scene' not in key for key in images.failures)
 
 
-def test_lettering_regenerates_once_then_rejects_all_panels(monkeypatch):
+def test_lettering_retries_each_requested_panel_once(monkeypatch):
     monkeypatch.setattr('comic_images.has_lettering',lambda data:True)
     class Router(FakeSceneRouter):
         count=0
@@ -124,7 +124,7 @@ def test_lettering_regenerates_once_then_rejects_all_panels(monkeypatch):
         def _cloudflare_image(self,*args,**kw):self.count+=1;return board()
     router=Router();images=ComicImages(router)
     assert [images.panel(['scene']*4,i) for i in range(4)]==[None]*4
-    assert router.count==2
+    assert router.count==8
 
 
 def test_lettering_recovery_returns_clean_second_board(monkeypatch):
@@ -135,7 +135,7 @@ def test_lettering_recovery_returns_clean_second_board(monkeypatch):
         def _cloudflare_translate(self,text,**kw):return text
         def _cloudflare_image(self,*args,**kw):self.count+=1;return board()
     router=Router();assert ComicImages(router).panel(['scene']*4,0)
-    assert router.count==5
+    assert router.count==2
 
 
 def test_ocr_failure_is_not_passed(monkeypatch):
@@ -178,3 +178,23 @@ def test_large_text_mask_never_erases_illustration(monkeypatch):
     monkeypatch.setattr('image_quality._ocr_engine',lambda:lambda pixels:detected)
     data=board()
     assert remove_lettering(data)==data
+
+
+@pytest.mark.parametrize('code', [4006, 3036])
+def test_cloudflare_daily_quota_reports_reset_without_retry(monkeypatch, code):
+    monkeypatch.setenv('CLOUDFLARE_API_TOKEN', 'test')
+    monkeypatch.setenv('CLOUDFLARE_ACCOUNT_ID', 'a' * 32)
+    calls = []
+    original = httpx.Client
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(429, json={'success': False, 'errors': [{'code': code}]})
+
+    monkeypatch.setattr('providers.HTTPClient', lambda **kw: original(
+        **kw, transport=httpx.MockTransport(handler)
+    ))
+    with pytest.raises(ProviderError, match='오전 9시') as caught:
+        ProviderRouter()._cloudflare_image('test')
+    assert caught.value.reason == 'quota_exhausted'
+    assert len(calls) == 1

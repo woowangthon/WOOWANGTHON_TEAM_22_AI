@@ -124,11 +124,15 @@ def test_cloudflare_plan_and_images_never_call_groq_or_openai(router,monkeypatch
         assert request.headers['authorization']=='Bearer cf-test'
         body=json.loads(request.read())
         if 'messages' in body and isinstance(body['messages'][1]['content'],list):
+            review_text = body['messages'][1]['content'][0]['text']
+            evidence = json.loads(review_text.split(': ', 1)[1])
+            assert evidence['captions'][evidence['scene']['index']]
+            assert 'action_quote' not in evidence['scene'] and 'source_quote' not in evidence['scene']
             return httpx.Response(200,json={'success':True,'result':completion({**{name:True for name in ('objects','action','appearance','grounding','lettering','composition','character')},'object_counts':[1]})})
         if 'messages' in body:
             captions=json.loads(body['messages'][1]['content'])['captions']
-            specs={'scenes':[{'index':i,'source_quote':caption,'objects':[{'name':'blocks','source_quote':caption}],
-                             'action':'The narrator stacks blocks.','action_quote':caption,'mode':'actual'}
+            specs={'scenes':[{'index':i,'objects':[{'name':'blocks','source_quote':caption}],
+                             'action':'The narrator stacks blocks.','mode':'actual'}
                             for i,caption in enumerate(captions)]}
             return httpx.Response(200,json={'success':True,'result':completion(specs)})
         assert len(body['prompt'])<=2048 and body['steps']==8

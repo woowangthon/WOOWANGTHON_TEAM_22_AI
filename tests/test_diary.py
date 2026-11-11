@@ -121,13 +121,14 @@ def test_be_metadata_not_accepted_by_ai():
     assert response.status_code==422
 
 
-def test_identical_question_is_not_repeated_even_if_model_review_accepts():
+def test_identical_question_skips_model_review():
     messages = conversation()
     previous = messages[-2].text
-    adapter = FakeAdapter(QuestionCandidate(question=previous, finished=False), Review(accepted=True))
+    adapter = FakeAdapter(QuestionCandidate(question=previous, finished=False))
     result = DiaryEngine(adapter).next_question(messages)
     assert result['fallback'] is True
     assert result['question'] != previous
+    assert len(adapter.calls) == 1
 
 
 def test_rejected_question_does_not_repeat_previous_fallback():
@@ -137,3 +138,11 @@ def test_rejected_question_does_not_repeat_previous_fallback():
     result = DiaryEngine(adapter).next_question(messages)
     assert result['fallback'] is True
     assert result['question'] != messages[-2].text
+
+
+def test_direct_diary_request_finishes_without_model():
+    adapter = FakeAdapter()
+    messages = conversation() + [Message(role='child', text='일기로 만들어 줘.')]
+    result = DiaryEngine(adapter).next_question(messages)
+    assert result['finished'] is True
+    assert not adapter.calls

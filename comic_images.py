@@ -3,6 +3,7 @@ import base64
 import hashlib
 import io
 import json
+import logging
 import re
 import threading
 import time
@@ -15,6 +16,7 @@ from scene_prompting import scene_prompt
 from comic_review import retry_hint
 
 
+logger = logging.getLogger(__name__)
 
 def visual_text(caption):
     """캡션은 원문 그대로 보존하고, 그림 입력에서만 직접 인용 대사를 제외합니다."""
@@ -51,48 +53,53 @@ class ComicImages:
                 if now - self.cache[old][0] >= self.ttl:
                     del self.cache[old]
             if key not in self.cache:
-                # 원문 인용은 검사용으로만 사용하고 이미지 프롬프트에는 보내지 않습니다.
                 specs = self.router._cloudflare_scene_specs(captions, deadline=deadline)
-                # 합본 실험에서 사건이 섞여, 각 요청에는 한 장면만 전달합니다.
-                # 네 장면을 모두 마친 결과만 캐시하여 부분 생성 결과가 완료로 표시되지 않게 합니다.
-                tiles = []
-                retry_left = 1
-                for scene in specs.scenes:
-                    prompt = scene_prompt(scene)
-                    clean = None
-                    while True:
-                        data = self.router._cloudflare_image(prompt, deadline=deadline)
-                        if time.monotonic() >= deadline:
-                            raise ProviderError('만화 생성 시간이 초과되었습니다.', reason='timeout')
-                        if has_lettering(data):
-                            data = remove_lettering(data)
-                        failures = (['lettering'] if has_lettering(data) else
-                                    self.router._cloudflare_review_scene(scene, data, captions,
-                                        reference=tiles[0] if tiles else None, deadline=deadline))
-                        if time.monotonic() >= deadline:
-                            raise ProviderError('만화 품질 검사 시간이 초과되었습니다.', reason='timeout')
-                        if not failures:
-                            clean = data
-                            break
-                        if retry_left <= 0 or deadline - time.monotonic() < 20:
-                            break
-                        retry_left -= 1
-                        prompt = scene_prompt(scene) + ' ' + retry_hint(failures)
-                        if len(prompt) > 2048:
-                            break
-                    if clean is None:
-                        tiles = [None] * 4
-                        break
-                    tiles.append(clean)
-                size = sum(len(tile or '') for tile in tiles)
-                if size > self.max_bytes:
-                    raise ProviderError('만화 이미지 용량이 너무 큽니다. 다시 시도해 주세요.')
-                while self.cache and (len(self.cache) >= 4 or
-                        sum(sum(len(x or '') for x in item[1]) for item in self.cache.values()) + size > self.max_bytes):
+                while self.cache and len(self.cache) >= 4:
                     self.cache.popitem(last=False)
-                self.cache[key] = (time.monotonic(), tiles)
+                # 장면 명세/결과는 짧은 메모리 캐시에만 보관합니다. API 필드 추가 없음.
+                self.cache[key] = (time.monotonic(), [None] * 4, specs, [0.0] * 4)
+            created, tiles, specs, attempted = self.cache[key]
             self.cache.move_to_end(key)
-            return self.cache[key][1][index]
+            if tiles[index] is not None:
+                return tiles[index]
+            if attempted[index] and time.monotonic() - attempted[index] < 15:
+                return None  # 연속 클릭 방지; 15초 뒤 이 컷만 다시 생성합니다.
+            scene = specs.scenes[index]
+            prompt = scene_prompt(scene)
+            reference = next((tile for tile in tiles if tile), None)
+            for attempt in range(2):
+                data = self.router._cloudflare_image(prompt, deadline=deadline)
+                if time.monotonic() >= deadline:
+                    raise ProviderError('만화 생성 시간이 초과되었습니다.', reason='timeout')
+                lettering = has_lettering(data)
+                if lettering:
+                    data = remove_lettering(data)
+                    lettering = has_lettering(data)
+                failures = (['lettering'] if lettering else
+                            self.router._cloudflare_review_scene(scene, data, captions,
+                                reference=reference, deadline=deadline))
+                if time.monotonic() >= deadline:
+                    raise ProviderError('만화 품질 검사 시간이 초과되었습니다.', reason='timeout')
+                if not failures:
+                    tiles[index] = data
+                    break
+                # 고정 기준명만 기록하며 사용자 원문·그림·키는 기록하지 않습니다.
+                logger.info('comic review_rejected panel=%d criteria=%s', index, ','.join(
+                    name for name in failures if name in {'objects','action','appearance','grounding','lettering','composition','character'}))
+                if attempt or deadline - time.monotonic() < 20:
+                    break
+                prompt = scene_prompt(scene) + ' ' + retry_hint(failures)
+                if len(prompt) > 2048:
+                    break
+            attempted[index] = time.monotonic()
+            size = sum(len(tile or '') for tile in tiles)
+            if size > self.max_bytes:
+                tiles[index] = None
+                raise ProviderError('만화 이미지 용량이 너무 큽니다. 다시 시도해 주세요.')
+            while len(self.cache) > 1 and sum(
+                    sum(len(x or '') for x in item[1]) for item in self.cache.values()) > self.max_bytes:
+                self.cache.popitem(last=False)
+            return tiles[index]
         except ProviderError as error:
             # 실패한 합본을 나머지 컷 요청마다 재생성하지 않습니다. 예외 객체/원문은 보관하지 않습니다.
             if key not in self.failures:
