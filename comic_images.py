@@ -46,8 +46,8 @@ class ComicImages:
                 if now - self.failures[old][0] >= 15:
                     del self.failures[old]
             if key in self.failures:
-                _, message = self.failures[key]
-                raise ProviderError(message)
+                _, message, reason, status, provider = self.failures[key]
+                raise ProviderError(message, reason=reason, status_code=status, provider=provider)
 
             for old in list(self.cache):
                 if now - self.cache[old][0] >= self.ttl:
@@ -105,7 +105,7 @@ class ComicImages:
             if key not in self.failures:
                 if len(self.failures) >= 4:
                     self.failures.popitem(last=False)
-                self.failures[key] = (time.monotonic(), str(error))
+                self.failures[key] = (time.monotonic(), str(error), error.reason, error.status_code, error.provider)
             raise
         finally:
             self.lock.release()

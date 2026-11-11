@@ -2,6 +2,7 @@
 import base64
 import io
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
@@ -97,7 +98,8 @@ def test_provider_retry_only_transient_servers(monkeypatch,status,count):
         calls.append(request)
         return httpx.Response(status,json={'success':False,'errors':[{'code':3003,'message':'PRIVATE'}]})
     monkeypatch.setattr('providers.HTTPClient',lambda **kw:original(**kw,transport=httpx.MockTransport(handler)))
-    with pytest.raises(ProviderError) as caught:ProviderRouter()._cloudflare_image('test')
+    with pytest.raises(ProviderError) as caught:
+        ProviderRouter()._cloudflare_request('planning-model', {}, deadline=time.monotonic() + 60)
     assert len(calls)==count and 'PRIVATE' not in str(caught.value)
     assert '3003' in str(caught.value)
 
@@ -198,3 +200,43 @@ def test_cloudflare_daily_quota_reports_reset_without_retry(monkeypatch, code):
         ProviderRouter()._cloudflare_image('test')
     assert caught.value.reason == 'quota_exhausted'
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize('status', [502, 503, 504])
+def test_image_gateway_failure_never_resends_generation(monkeypatch, status):
+    monkeypatch.setenv('CLOUDFLARE_API_TOKEN', 'test')
+    monkeypatch.setenv('CLOUDFLARE_ACCOUNT_ID', 'a' * 32)
+    calls = []
+    original = httpx.Client
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(status, json={'success': False})
+
+    monkeypatch.setattr('providers.HTTPClient', lambda **kw: original(
+        **kw, transport=httpx.MockTransport(handler)
+    ))
+    with pytest.raises(ProviderError) as caught:
+        ProviderRouter()._cloudflare_image('test')
+    assert caught.value.reason == 'image_result_unknown'
+    assert caught.value.status_code == status
+    assert len(calls) == 1
+
+
+def test_panel_error_cache_preserves_unknown_result():
+    class Router(FakeSceneRouter):
+        calls = 0
+
+        def _cloudflare_image(self, *args, **kwargs):
+            self.calls += 1
+            raise ProviderError('fixed error', reason='image_result_unknown',
+                                status_code=504, provider='cloudflare')
+
+    router = Router()
+    images = ComicImages(router)
+    for _ in range(2):
+        with pytest.raises(ProviderError) as caught:
+            images.panel(['장면'] * 4, 0)
+        assert caught.value.reason == 'image_result_unknown'
+        assert caught.value.status_code == 504
+    assert router.calls == 1

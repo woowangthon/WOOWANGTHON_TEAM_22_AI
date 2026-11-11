@@ -6,7 +6,9 @@ import os
 import re
 
 from fastapi import HTTPException
-from openai import OpenAIError
+from openai import APIConnectionError, OpenAIError
+import httpx
+from diagnostics import failure_details
 from pydantic import ValidationError
 
 from engine import GenerationError, ProviderError
@@ -160,10 +162,26 @@ class VisualStoryService:
             else:
                 result['imageUrl'] = self._generate_image(text, caption, body.format)
             result['status'] = 'generated' if result['imageUrl'] else 'rejected'
-        except ProviderError as error:
-            result['error'] = str(error)
-        except (GenerationError, OpenAIError, ValidationError):
-            result['error'] = '이 장면의 그림을 생성하거나 검토하지 못했습니다. 글은 유지하고 이 장면만 재시도해 주세요.'
+        except (GenerationError, OpenAIError, ValidationError, TimeoutError, httpx.TimeoutException) as error:
+            reason, upstream_status, _ = failure_details(error)
+            timeout = reason == 'timeout' or upstream_status == 504
+            unknown = (
+                reason == 'image_result_unknown'
+                or isinstance(error, APIConnectionError)
+                or (isinstance(error, OpenAIError) and (upstream_status or 0) >= 500)
+            )
+            if timeout or unknown:
+                status = 504 if timeout else upstream_status if upstream_status in (502, 503) else 502
+                raise HTTPException(
+                    status, detail={
+                        'code': 'IMAGE_RESULT_UNKNOWN',
+                        'message': '그림 생성 결과를 확인하지 못했습니다. 기존 작업 상태를 확인하기 전에는 다시 요청하지 마세요.',
+                    },
+                    headers={'Cache-Control': 'no-store'},
+                ) from None
+            result['error'] = str(error) if isinstance(error, ProviderError) else (
+                '이 장면의 그림을 생성하거나 검토하지 못했습니다. 글은 유지하고 이 장면만 재시도해 주세요.'
+            )
         return result
 
     def _generate_image(self, diary, caption, kind):
@@ -173,7 +191,7 @@ class VisualStoryService:
                 {'diary_context': diary, 'selected_text': caption, 'format': kind}, REVIEW_PROMPT)
         client = self.engine.adapter.client
         payload = {'diary_context': diary, 'selected_text': caption}
-        generated = client.with_options(timeout=180).images.generate(
+        generated = client.with_options(timeout=180, max_retries=0).images.generate(
             model=os.getenv('IMAGE_MODEL', 'gpt-image-1.5'),
             prompt=STYLES[kind] + '\n' + IMAGE_RULES + '\n' + json.dumps(payload, ensure_ascii=False),
             size='1024x1024', quality='low', output_format='png', n=1)

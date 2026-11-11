@@ -12,7 +12,7 @@ from functools import cached_property
 
 import httpx
 from httpx import Client as HTTPClient
-from openai import OpenAI, OpenAIError
+from openai import APIConnectionError, OpenAI, OpenAIError
 from pydantic import ValidationError
 
 from engine import ProviderError
@@ -200,8 +200,8 @@ class ProviderRouter:
             raise ProviderError('CLOUDFLARE_ACCOUNT_ID에는 32자리 계정 ID를 입력해 주세요.')
         return token, account
 
-    def _cloudflare_request(self, model, payload, *, deadline):
-        """180초 총 예산 안에서 일시적 서버 오류만 1회 재시도합니다."""
+    def _cloudflare_request(self, model, payload, *, deadline, image_generation=False):
+        """장면 구성·검토만 일시적 서버 오류에 재시도합니다."""
         token, account = self._cloudflare_credentials()
         for attempt in range(2):
             remaining = deadline - time.monotonic()
@@ -223,6 +223,10 @@ class ProviderRouter:
                          and type(item.get('code')) is int] if isinstance(errors, list) else []
                 if response.is_error or body.get('success') is False:
                     logging.getLogger(__name__).warning('cloudflare status=%s codes=%s', response.status_code, codes)
+                    if image_generation and response.status_code >= 500:
+                        raise ProviderError('cloudflare: 그림 생성 결과를 확인하지 못했습니다.',
+                                            reason='image_result_unknown', status_code=response.status_code,
+                                            provider='cloudflare')
                     if response.status_code in (502, 503, 504) and attempt == 0 and remaining > 3:
                         time.sleep(1)
                         continue
@@ -246,7 +250,13 @@ class ProviderRouter:
                     raise error
                 return body.get('result', {})
             except httpx.RequestError as error:
-                raise provider_failure('cloudflare', error) from None
+                failure = provider_failure('cloudflare', error)
+                if image_generation and not isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+                    raise ProviderError('그림 생성 결과를 확인하지 못했습니다.',
+                                        reason='image_result_unknown',
+                                        status_code=504 if failure.reason == 'timeout' else 502,
+                                        provider='cloudflare') from None
+                raise failure from None
         raise ProviderError('Cloudflare: 그림 생성에 실패했습니다.')
 
     def _cloudflare_translate(self, text, *, deadline):
@@ -348,7 +358,8 @@ class ProviderRouter:
         if not isinstance(prompt, str) or not 1 <= len(prompt) <= 2048:
             raise ProviderError('Cloudflare 그림 입력 한도를 확인해 주세요.', reason='invalid_request')
         result = self._cloudflare_request(model, {'prompt': prompt, 'steps': 8},
-                                          deadline=deadline if deadline is not None else time.monotonic() + 180)
+                                          deadline=deadline if deadline is not None else time.monotonic() + 180,
+                                          image_generation=True)
         encoded = result.get('image') if isinstance(result, dict) else None
         if not isinstance(encoded, str) or not encoded:
             raise ProviderError('Cloudflare: 그림 응답이 비어 있습니다.')
@@ -394,7 +405,7 @@ class ProviderRouter:
         else:
             getattr(self, self.vision_provider)
             try:
-                response = self.openai.with_options(timeout=180).images.generate(
+                response = self.openai.with_options(timeout=180, max_retries=0).images.generate(
                     model=setting('OPENAI_IMAGE_MODEL', setting('IMAGE_MODEL', 'gpt-image-1.5')),
                     prompt=instruction + '\n' + json.dumps(payload, ensure_ascii=False, separators=(',', ':')),
                     size='1024x1024', quality='low', output_format='png', n=1)
@@ -405,7 +416,13 @@ class ProviderRouter:
                 except ValueError:
                     raise ProviderError('이미지 파일 형식이나 데이터를 확인하지 못했습니다.') from None
             except OpenAIError as error:
-                raise provider_failure('openai', error) from None
+                failure = provider_failure('openai', error)
+                if isinstance(error, APIConnectionError) or (failure.status_code or 0) >= 500:
+                    raise ProviderError('그림 생성 결과를 확인하지 못했습니다.',
+                                        reason='image_result_unknown',
+                                        status_code=504 if failure.reason == 'timeout' else failure.status_code,
+                                        provider='openai') from None
+                raise failure from None
         return image_url if self._review_image(image_url, review_instruction, payload) else None
 
     def image(self, text):
