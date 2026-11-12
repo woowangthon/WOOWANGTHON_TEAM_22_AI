@@ -60,15 +60,3 @@ def parse_checks(value, scene):
     except (ValidationError, TypeError, ValueError):
         raise ProviderError('Cloudflare 그림 품질 검사 응답을 확인하지 못했습니다. 그림은 표시하지 않습니다.',
                             reason='response_schema_invalid', provider='cloudflare') from None
-
-
-def retry_hint(failures):
-    hints={
-        'objects':'Show all named props and only the stated quantities.',
-        'action':'Make the specified action and final object position visibly unambiguous.',
-        'appearance':'Preserve explicitly stated object colors and attributes.',
-        'grounding':'Remove unstated props, people, decorations and emotional expressions.',
-        'lettering':'Keep all surfaces blank, without written language.',
-        'composition':'Show one clear scene with the main objects completely visible.',
-        'character':'Use the same simple cream bean narrator as the reference.'}
-    return ' '.join(hints[name] for name in failures if name in hints)

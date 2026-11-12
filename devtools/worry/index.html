@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>고민 이야기 테스트</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#f4f5ec;color:#223b30;font:16px/1.65 system-ui,sans-serif}
+  main{width:min(100% - 32px,1000px);margin:40px auto}
+  .layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:24px;align-items:start}
+  aside{background:#fffdf8;border:1px solid #cedbd0;border-radius:18px;padding:16px}
+  aside h2{font-size:18px;margin:0 0 8px}
+  #history{display:grid;gap:6px}
+  #history button{text-align:left;width:100%}
+  #history button[aria-pressed=true]{background:#e5eee2;border-color:#285742}
+  .note{font-size:14px}
+  #messages{margin-top:0}
+  @media(max-width:650px){.layout{grid-template-columns:minmax(0,1fr);gap:12px}main{margin:20px auto}}
+  h1{font-size:clamp(24px,6vw,36px);margin:0}
+  p{margin:6px 0 16px}
+  #messages{display:flex;flex-direction:column;gap:12px;min-height:200px;max-height:55vh;overflow:auto;
+    border:1px solid #cedbd0;background:#fffdf8;border-radius:18px;padding:18px;list-style:none}
+  li{width:fit-content;max-width:90%;background:#e5eee2;border-radius:14px;padding:9px 14px;overflow-wrap:anywhere}
+  li.child{align-self:flex-end;background:#f8ebbb}
+  li strong{display:block;font-size:13px}
+  li.assistant{display:grid;grid-template-columns:34px minmax(0,1fr);gap:8px;align-items:start}
+  .mascot{width:34px;height:34px;background:#fff8df;border-radius:50%;padding:2px}
+  [hidden]{display:none!important}
+  form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+  label{display:grid;flex:1 1 240px;gap:4px}
+  textarea,button{font:inherit}
+  textarea{width:100%;border:1px solid #809788;border-radius:10px;padding:9px;background:#fff;color:inherit}
+  button{padding:8px 14px;border:1px solid #285742;border-radius:10px;cursor:pointer;background:#fff;color:#285742}
+  button[type=submit]{background:#285742;color:#fff}
+  button:disabled{cursor:default;opacity:.55}
+  .tools{display:flex;flex-wrap:wrap;gap:10px}
+  #status{min-height:1.7em;font-size:14px}
+</style>
+</head>
+<body>
+<main>
+  <h1>고민 이야기</h1>
+  <p>우냥이는 이야기를 들어주는 AI 캐릭터예요. 이 화면에서는 가상의 이야기로 시험해 주세요.</p>
+  <div class="layout">
+  <aside aria-label="지난 대화">
+    <h2>지난 대화</h2>
+    <p class="note">이 화면을 닫거나 새로고침하면 기록이 사라져요.</p>
+    <p id="history-empty" class="note">아직 지난 대화가 없어요.</p>
+    <div id="history"></div>
+  </aside>
+  <section aria-label="우냥이와 대화">
+  <ul id="messages" aria-label="대화" aria-live="polite"></ul>
+  <form id="chat">
+    <label>하고 싶은 말<textarea id="input" maxlength="800" rows="2" placeholder="예: 친구랑 다퉜어."></textarea></label>
+    <button id="send" type="submit">보내기</button>
+  </form>
+  <p id="status" role="status"></p>
+  <div class="tools">
+    <button id="finish" type="button">그만하기</button>
+    <button id="restart" type="button">새 대화</button>
+    <button id="back" type="button" hidden>현재 대화로</button>
+  </div>
+  </section>
+  </div>
+</main>
+<script type="module">
+const byId = id => document.getElementById(id);
+const list = byId('messages');
+const input = byId('input');
+const status = byId('status');
+let messages = [];
+let busy = false;
+let ended = false;
+let currentRecord = null;
+let selectedRecord = null;
+let currentStatus = '';
+const records = [];
+const dateFormat = new Intl.DateTimeFormat('ko-KR', {month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit'});
+
+function updateControls() {
+  const viewingHistory = selectedRecord !== null;
+  input.disabled = byId('send').disabled = byId('finish').disabled = busy || ended || viewingHistory;
+  byId('chat').hidden = viewingHistory;
+  byId('finish').hidden = viewingHistory;
+  byId('back').hidden = !viewingHistory;
+  byId('restart').disabled = busy;
+  for (const button of byId('history').children) button.disabled = busy;
+}
+
+function renderMessage(role, text) {
+  const row = document.createElement('li');
+  row.className = role;
+  const label = document.createElement('strong');
+  label.textContent = role === 'child' ? '나' : '우냥이';
+  const bubble = document.createElement('div');
+  bubble.append(label, document.createTextNode(text));
+  if (role === 'assistant') {
+    const avatar = document.createElement('img');
+    avatar.className = 'mascot';
+    avatar.src = '/dev/worry/mascot.svg';
+    avatar.alt = ''; // 옆의 우냥이 이름을 읽으므로 장식 이미지로 처리합니다.
+    row.append(avatar);
+  }
+  row.append(bubble);
+  list.append(row);
+  list.scrollTop = list.scrollHeight;
+}
+
+function append(role, text) {
+  messages.push({role, text});
+  renderMessage(role, text);
+}
+
+function showConversation(record = null) {
+  if (busy) return;
+  selectedRecord = record;
+  list.replaceChildren();
+  for (const item of record?.messages ?? messages) renderMessage(item.role, item.text);
+  if (record) list.scrollTop = 0;
+  status.textContent = record ? '지난 대화를 보고 있어요.' : currentStatus;
+  renderHistory();
+}
+
+function renderHistory() {
+  const history = byId('history');
+  history.replaceChildren();
+  byId('history-empty').hidden = records.length > 0;
+  for (const record of records) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = `대화 ${record.number} · ${dateFormat.format(record.createdAt)}`;
+    button.setAttribute('aria-pressed', String(record === selectedRecord));
+    button.addEventListener('click', () => showConversation(record));
+    history.append(button);
+  }
+  updateControls();
+}
+
+function saveConversation() {
+  if (currentRecord || !messages.some(item => item.role === 'child')) return;
+  currentRecord = {
+    number: records.length + 1,
+    createdAt: new Date(),
+    messages: messages.slice(),
+  };
+  records.unshift(currentRecord);
+  renderHistory();
+}
+
+function finishConversation() {
+  if (busy || ended || selectedRecord) return;
+  ended = true;
+  append('assistant', '여기까지 이야기해 줘서 고마워. 또 이야기하고 싶을 때 찾아와도 좋아.');
+  currentStatus = '대화를 마쳤어요.';
+  status.textContent = currentStatus;
+  saveConversation();
+  updateControls();
+}
+
+async function requestTurn(text = null) {
+  if (busy || ended || selectedRecord) return;
+  busy = true;
+  updateControls();
+  status.textContent = '응답을 기다리고 있어요.';
+  const history = text === null ? [] : [...messages, {role: 'child', text}].slice(-24);
+  // 서버 한도를 넘기지 않도록 오래된 대화부터 제외합니다.
+  while (history.reduce((sum, item) => sum + item.text.length, 0) > 8000) history.shift();
+  try {
+    const response = await fetch('/api/worry/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      cache: 'no-store',
+      body: JSON.stringify({messages: history})
+    });
+    if (!response.ok) throw new Error('대화를 이어가지 못했어요. 다시 시도해 주세요.');
+    const result = await response.json();
+    if (text !== null) {
+      append('child', text);
+      input.value = '';
+    }
+    append('assistant', result.message);
+    ended = ['finished', 'needs_adult', 'unavailable'].includes(result.status);
+    currentStatus = ended ? '대화를 마쳤어요.' :
+      result.mock ? '체험 모드 · 외부 모델을 호출하지 않아요.' : '';
+    status.textContent = currentStatus;
+    if (ended) saveConversation();
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    busy = false;
+    updateControls();
+    if (!ended) input.focus();
+  }
+}
+
+function restart() {
+  if (busy) return;
+  saveConversation();
+  messages = [];
+  ended = false;
+  currentRecord = null;
+  currentStatus = '';
+  input.value = '';
+  showConversation();
+  requestTurn();
+}
+
+byId('chat').addEventListener('submit', event => {
+  event.preventDefault();
+  const text = input.value.trim();
+  if (text) requestTurn(text);
+});
+byId('finish').addEventListener('click', finishConversation);
+byId('back').addEventListener('click', () => showConversation());
+byId('restart').addEventListener('click', restart);
+restart();
+</script>
+</body>
+</html>

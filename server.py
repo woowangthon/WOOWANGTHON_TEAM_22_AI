@@ -25,6 +25,7 @@ from visual_models import (VisualStoryRequest, VisualStoryResponse,
                            VisualImageRequest, VisualImageResponse)
 from visual_story import VisualStoryService
 from dev_voice import attach_voice_demo
+from worry_support import WorryRequest, WorryResponse, respond_to_worry
 
 BASE_DIR = Path(__file__).resolve().parent  # .env를 AI 저장소에서만 읽습니다.
 load_dotenv(BASE_DIR / '.env')
@@ -73,6 +74,11 @@ def create_app(engine=None):
     @app.post('/api/chat', response_model=QuestionResponse)
     def chat(body: ConversationRequest):
         return engine.next_question(body.messages)
+
+    @app.post('/api/worry/chat', response_model=WorryResponse)
+    def worry_chat(body: WorryRequest, response: Response):
+        response.headers['Cache-Control'] = 'no-store'
+        return respond_to_worry(engine, body.messages)
 
     @app.post('/api/diary', response_model=DiaryResponse)
     async def diary(body: ConversationRequest):

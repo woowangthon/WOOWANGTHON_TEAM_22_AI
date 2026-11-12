@@ -110,7 +110,7 @@ def test_api_schema_exposes_generation_only():
     schema=client.get('/openapi.json').json()
     assert set(schema['paths'])=={'/api/status','/api/chat','/api/diary','/api/image',
                                   '/api/transcribe','/api/speech','/api/voice-chat',
-                                  '/api/visual-story','/api/visual-story/image'}
+                                  '/api/visual-story','/api/visual-story/image','/api/worry/chat'}
     assert 'DiaryResponse' in schema['components']['schemas']
     assert 'Source' in schema['components']['schemas']
 

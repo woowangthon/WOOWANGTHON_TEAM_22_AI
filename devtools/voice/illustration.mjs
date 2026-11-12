@@ -75,9 +75,14 @@ export class IllustratedDiary {
     }
   }
   clear(){this.cancel();this.state=null;this.onChange(null);}
+  hasUnknownResult(text,format){
+    return this.state?.diary_text===text&&this.state.format===format&&
+      this.state.scenes.some(scene=>scene.status==='unknown');
+  }
   async build(text,pages=2,format='storybook',options={}){
     if(this.busy)throw new Error('그림을 만들고 있어요. 잠시 기다려 주세요.');
     text=text.trim();
+    if(this.hasUnknownResult(text,format))throw new Error('이 만화의 이전 생성 결과를 먼저 확인해 주세요.');
     if(!text||text.length>6000)throw new Error('확인한 일기를 1~6,000자로 입력해 주세요.');
     if(!Number.isInteger(pages)||pages<1||pages>6)throw new Error('그림 수를 1~6장으로 선택해 주세요.');
     if(!['storybook','comic4'].includes(format))throw new Error('지원하지 않는 그림 형식입니다.');
@@ -121,7 +126,13 @@ export class IllustratedDiary {
         scene.error=result.error||(result.status==='rejected'?'이 컷이 그림 검사를 통과하지 못했어요. 다른 컷은 유지됩니다. 15초 뒤 이 컷만 다시 만들어 주세요.':
           result.status==='mock'?'체험 모드에서는 실제 그림을 만들지 않아요. 실제 AI 모드로 실행해 주세요.':'그림을 받지 못했어요. 키와 무료 한도를 확인해 주세요.');
       }
-    }catch(error){if(version===this.version){scene.status='failed';scene.error=error.message;scene.imageUrl=null;}}
+    }catch(error){
+      if(version===this.version){
+        scene.status=error.code==='IMAGE_RESULT_UNKNOWN'?'unknown':'failed';
+        scene.error=error.message;
+        scene.imageUrl=null;
+      }
+    }
     if(version===this.version){
       for(const repeated of state.scenes)if(repeated.reuse_scene_id===scene.scene_id)this.reuseScene(repeated);
       this.onChange(state);
@@ -133,11 +144,12 @@ export class IllustratedDiary {
       scene.status='failed';scene.imageUrl=null;scene.error='반복 컷의 근거가 일치하지 않습니다.';return;
     }
     scene.imageUrl=original.imageUrl;scene.status=original.status;
-    scene.error=original.error?'원본 컷을 다시 만들면 이 반복 컷도 함께 갱신됩니다.':null;
+    scene.error=original.status==='unknown'?original.error:
+      original.error?'원본 컷을 다시 만들면 이 반복 컷도 함께 갱신됩니다.':null;
   }
   async retry(index){
     if(this.busy)throw new Error('현재 그림 생성이 끝난 뒤 다시 시도해 주세요.');
-    const scene=this.state?.scenes[index];if(!scene||scene.status==='generated')return;
+    const scene=this.state?.scenes[index];if(!scene||['generated','unknown'].includes(scene.status))return;
     if(scene.repeated&&scene.reuse_scene_id){
       const original=this.state.scenes.findIndex(s=>s.scene_id===scene.reuse_scene_id);
       if(original<0)throw new Error('원본 컷을 찾지 못했습니다.');

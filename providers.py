@@ -270,13 +270,17 @@ class ProviderRouter:
             raise ProviderError('Cloudflare: 장면 번역 응답이 비어 있습니다.')
         return translated.strip()
 
-    def _cloudflare_scene_specs(self, captions, *, deadline):
+    def _cloudflare_scene_specs(self, captions, *, deadline, repair=False):
         """번역 4회 대신 Cloudflare에서 원문 근거가 있는 시각 명세를 1회 작성합니다."""
         from scene_prompting import SCENE_PROMPT, SceneDrafts, validate_specs
         schema = SceneDrafts.model_json_schema()
+        instruction = SCENE_PROMPT
+        if repair:
+            instruction += ('\nRebuild the plan from the captions. Before returning, check every name and action '
+                            'is ASCII English and every object quote occurs verbatim in this or an earlier caption.')
         result = self._cloudflare_request(
             setting('CLOUDFLARE_SCENE_MODEL', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'),
-            {'messages': [{'role': 'system', 'content': SCENE_PROMPT},
+            {'messages': [{'role': 'system', 'content': instruction},
                           {'role': 'user', 'content': json.dumps({'captions': captions}, ensure_ascii=False)}],
              'max_tokens': 2200, 'temperature': 0.1, 'response_format': {'type': 'json_schema', 'json_schema': schema}},
             deadline=min(deadline, time.monotonic() + 55))
@@ -348,8 +352,8 @@ class ProviderRouter:
         from comic_images import ComicImages
         return ComicImages(self)
 
-    def generate_comic_panel(self, captions, index):
-        return self.comic_images.panel(captions, index)
+    def generate_comic_panel(self, captions, index, *, panel_count=4):
+        return self.comic_images.panel(captions, index, panel_count=panel_count)
 
     def _cloudflare_image(self, prompt, *, deadline=None):
         model = setting('CLOUDFLARE_IMAGE_MODEL', '@cf/black-forest-labs/flux-1-schnell')

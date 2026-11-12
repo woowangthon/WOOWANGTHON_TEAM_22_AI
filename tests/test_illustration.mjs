@@ -112,3 +112,22 @@ test('comic dialogue preserves quoted source and never truncates or injects HTML
   assert.ok(html.includes('&lt;script&gt;'));assert.ok(!html.includes('<script>'));
   assert.ok(!comicArtworkHTML({caption:'실패',imageUrl:null}).includes('comic-dialogue'));
 });
+
+
+test('unknown image result keeps other images and prevents resubmitting the same draft',async()=>{
+  let imageCalls=0;
+  const diary=new IllustratedDiary(async(path,body)=>{
+    if(path==='/api/visual-story')return structuredClone(plan);
+    imageCalls++;
+    if(body.source_ids[0]===0){
+      throw Object.assign(new Error('이전 생성 결과를 확인해 주세요.'),{code:'IMAGE_RESULT_UNKNOWN'});
+    }
+    return result(body.source_ids);
+  });
+  await diary.build(plan.diary_text);
+  assert.deepEqual(diary.state.scenes.map(scene=>scene.status),['unknown','generated']);
+  assert.equal(diary.state.scenes[1].imageUrl,image);
+  await diary.retry(0);
+  await assert.rejects(diary.build(plan.diary_text),/이전 생성 결과/);
+  assert.equal(imageCalls,2);
+});

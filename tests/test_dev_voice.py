@@ -29,7 +29,7 @@ def test_local_demo_and_assets(monkeypatch,host):
             assert asset.status_code==200
             assert asset.headers['cache-control']=='no-store'
         assert client.get('/dev/voice/.env').status_code==404
-        assert len(client.get('/openapi.json').json()['paths'])==9
+        assert len(client.get('/openapi.json').json()['paths'])==10
 
 
 def test_remote_demo_forbidden_but_api_unchanged(monkeypatch):

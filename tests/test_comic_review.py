@@ -1,6 +1,6 @@
 """불일치·불완전 검사를 성공으로 처리하지 않는지 검사합니다. 외부 호출 없음."""
 import pytest
-from comic_review import parse_checks,retry_hint
+from comic_review import parse_checks
 from engine import ProviderError
 from scene_prompting import SceneSpec
 from test_comic_images import FakeSceneRouter, board
@@ -25,7 +25,7 @@ def test_action_and_color_mismatches_are_rejected():
 def test_incomplete_or_non_boolean_review_is_failed(value):
     with pytest.raises(ProviderError):parse_checks(value,scene())
 
-def test_quality_rejection_retries_once_and_never_caches_unchecked_images(monkeypatch):
+def test_quality_rejection_does_not_generate_a_second_image(monkeypatch):
     monkeypatch.setattr('comic_images.has_lettering',lambda data:False)
     class Router(FakeSceneRouter):
         images=0
@@ -33,7 +33,7 @@ def test_quality_rejection_retries_once_and_never_caches_unchecked_images(monkey
         def _cloudflare_review_scene(self,*a,**kw):return ['action']
     router=Router();images=ComicImages(router)
     assert [images.panel(['scene']*4,i) for i in range(4)]==[None]*4
-    assert router.images==8
+    assert router.images==4
 
 def test_review_error_is_not_an_unchecked_pass(monkeypatch):
     monkeypatch.setattr('comic_images.has_lettering',lambda data:False)
@@ -42,11 +42,7 @@ def test_review_error_is_not_an_unchecked_pass(monkeypatch):
         def _cloudflare_review_scene(self,*a,**kw):raise ProviderError('fixed review error')
     with pytest.raises(ProviderError,match='review error'):ComicImages(Router()).panel(['scene']*4,0)
 
-def test_retry_feedback_uses_only_fixed_criteria():
-    assert 'PRIVATE' not in retry_hint(['PRIVATE','action'])
-
-
-def test_one_bad_panel_keeps_approved_panels_and_retry_only_bad_panel(monkeypatch):
+def test_one_bad_panel_continues_to_later_panels_without_an_automatic_retry(monkeypatch):
     monkeypatch.setattr('comic_images.has_lettering',lambda data:False)
     now=[100.0]
     monkeypatch.setattr('comic_images.time.monotonic',lambda:now[0])
@@ -58,11 +54,11 @@ def test_one_bad_panel_keeps_approved_panels_and_retry_only_bad_panel(monkeypatc
     router=Router();images=ComicImages(router);captions=['scene']*4
     results=[images.panel(captions,i) for i in range(4)]
     assert [bool(x) for x in results]==[True,False,True,True]
-    assert router.images==5
-    assert images.panel(captions,1) is None and router.images==5
+    assert router.images==4
+    assert images.panel(captions,1) is None and router.images==4
     now[0]+=16;router.bad=False
-    assert images.panel(captions,1) and router.images==6
-    assert images.panel(captions,0)==results[0] and router.images==6
+    assert images.panel(captions,1) and router.images==5
+    assert images.panel(captions,0)==results[0] and router.images==5
 
 
 def test_complex_scene_objects_are_not_forced_to_count_one():

@@ -104,21 +104,21 @@ def test_provider_retry_only_transient_servers(monkeypatch,status,count):
     assert '3003' in str(caught.value)
 
 
-def test_failed_board_is_not_repeated_for_each_panel():
+def test_account_quota_failure_is_not_repeated_for_each_panel():
     class Router(FakeSceneRouter):
         count=0
         def _cloudflare_translate(self,text,**kw):return text
         def _cloudflare_image(self,*args,**kw):
             self.count+=1
-            raise ProviderError('fixed safe error')
+            raise ProviderError('fixed safe error', reason='quota_exhausted', status_code=429)
     router=Router();images=ComicImages(router)
     for i in range(4):
         with pytest.raises(ProviderError,match='fixed safe error'):images.panel(['scene']*4,i)
     assert router.count==1
-    assert all('scene' not in key for key in images.failures)
+    assert all('scene' not in digest and index is None for digest, index in images.failures)
 
 
-def test_lettering_retries_each_requested_panel_once(monkeypatch):
+def test_lettering_rejection_does_not_repeat_generation(monkeypatch):
     monkeypatch.setattr('comic_images.has_lettering',lambda data:True)
     class Router(FakeSceneRouter):
         count=0
@@ -126,18 +126,20 @@ def test_lettering_retries_each_requested_panel_once(monkeypatch):
         def _cloudflare_image(self,*args,**kw):self.count+=1;return board()
     router=Router();images=ComicImages(router)
     assert [images.panel(['scene']*4,i) for i in range(4)]==[None]*4
-    assert router.count==8
+    assert router.count==4
 
 
-def test_lettering_recovery_returns_clean_second_board(monkeypatch):
-    checks=iter([True,True]+[False]*8)
+def test_cleaned_lettering_keeps_the_first_image_request(monkeypatch):
+    checks=iter([True,False])
+    cleaned = board() + 'cleaned'
+    monkeypatch.setattr('comic_images.remove_lettering', lambda data: cleaned)
     monkeypatch.setattr('comic_images.has_lettering',lambda data:next(checks))
     class Router(FakeSceneRouter):
         count=0
         def _cloudflare_translate(self,text,**kw):return text
         def _cloudflare_image(self,*args,**kw):self.count+=1;return board()
-    router=Router();assert ComicImages(router).panel(['scene']*4,0)
-    assert router.count==2
+    router=Router();assert ComicImages(router).panel(['scene']*4,0) == cleaned
+    assert router.count==1
 
 
 def test_ocr_failure_is_not_passed(monkeypatch):
@@ -240,3 +242,131 @@ def test_panel_error_cache_preserves_unknown_result():
         assert caught.value.reason == 'image_result_unknown'
         assert caught.value.status_code == 504
     assert router.calls == 1
+
+
+def test_cached_success_is_accessible_after_a_later_panel_fails():
+    class Router(FakeSceneRouter):
+        calls = 0
+
+        def _cloudflare_image(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls > 1:
+                raise ProviderError('fixed error', reason='image_result_unknown', status_code=504)
+            return board()
+
+    router = Router()
+    images = ComicImages(router)
+    captions = ['장면'] * 4
+    first = images.panel(captions, 0)
+    with pytest.raises(ProviderError):
+        images.panel(captions, 1)
+    assert images.panel(captions, 0) == first
+    assert router.calls == 2
+
+
+def test_uncertain_panel_does_not_block_other_panels_or_resend_itself():
+    class Router(FakeSceneRouter):
+        calls = 0
+        plan_calls = 0
+
+        def _cloudflare_scene_specs(self, *args, **kwargs):
+            self.plan_calls += 1
+            return super()._cloudflare_scene_specs(*args, **kwargs)
+
+        def _cloudflare_image(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise ProviderError('result unknown', reason='image_result_unknown', status_code=504)
+            return board()
+
+    router = Router()
+    images = ComicImages(router)
+    captions = ['장면'] * 4
+    with pytest.raises(ProviderError, match='result unknown'):
+        images.panel(captions, 0)
+    assert all(images.panel(captions, index) for index in (1, 2, 3))
+    with pytest.raises(ProviderError, match='result unknown'):
+        images.panel(captions, 0)
+    assert router.calls == 4
+    assert router.plan_calls == 1
+
+
+def test_invalid_scene_plan_repairs_before_any_image_request():
+    class Router(FakeSceneRouter):
+        attempts = []
+        images = 0
+
+        def _cloudflare_scene_specs(self, captions, *, deadline, repair=False):
+            self.attempts.append((deadline, repair))
+            assert self.images == 0
+            if not repair:
+                raise ProviderError('invalid plan', reason='response_schema_invalid')
+            return super()._cloudflare_scene_specs(captions, deadline=deadline)
+
+        def _cloudflare_image(self, *args, **kwargs):
+            self.images += 1
+            return board()
+
+    router = Router()
+    assert ComicImages(router).panel(['장면'] * 4, 0)
+    assert [repair for _, repair in router.attempts] == [False, True]
+    assert router.attempts[0][0] == router.attempts[1][0]
+    assert router.images == 1
+
+
+def test_neuron_budget_prioritizes_first_pass_and_blocks_excess_retries(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr('comic_images.time.monotonic', lambda: clock[0])
+
+    class Router(FakeSceneRouter):
+        calls = 0
+
+        def _cloudflare_image(self, *args, **kwargs):
+            self.calls += 1
+            return board()
+
+        def _cloudflare_review_scene(self, *args, **kwargs):
+            return ['action']
+
+    router = Router()
+    images = ComicImages(router)
+    captions = ['장면'] * 4
+    assert images.panel(captions, 0) is None
+    clock[0] += 16
+    assert images.panel(captions, 0) is None
+    assert router.calls == 1
+    for index in range(1, 4):
+        assert images.panel(captions, index) is None
+    clock[0] += 16
+    assert images.panel(captions, 0) is None
+    assert images.panel(captions, 1) is None
+    with pytest.raises(ProviderError, match='생성 예산'):
+        images.panel(captions, 2)
+    assert router.calls == 6
+    assert next(iter(images.cache.values())).reserved_neurons == 2400
+
+
+def test_unknown_panel_stays_blocked_after_short_failure_cache_expires(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr('comic_images.time.monotonic', lambda: clock[0])
+
+    class Router(FakeSceneRouter):
+        calls = 0
+
+        def _cloudflare_image(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise ProviderError('result unknown', reason='image_result_unknown', status_code=504)
+            return board()
+
+    router = Router()
+    images = ComicImages(router)
+    captions = ['장면'] * 4
+    with pytest.raises(ProviderError):
+        images.panel(captions, 0)
+    clock[0] += 16
+    with pytest.raises(ProviderError) as error:
+        images.panel(captions, 0)
+    assert error.value.reason == 'image_result_unknown'
+    assert images.panel(captions, 1)
+    assert router.calls == 2

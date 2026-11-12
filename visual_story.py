@@ -158,10 +158,12 @@ class VisualStoryService:
                     and hasattr(adapter, 'generate_comic_panel') and index is not None):
                 captions = ['\n'.join(sources[sid]['text'] for sid in group) for group in groups]
                 captions.extend([captions[-1]] * (4 - len(captions)))
-                result['imageUrl'] = adapter.generate_comic_panel(captions, index)
+                result['imageUrl'] = adapter.generate_comic_panel(captions, index, panel_count=len(groups))
             else:
                 result['imageUrl'] = self._generate_image(text, caption, body.format)
             result['status'] = 'generated' if result['imageUrl'] else 'rejected'
+            if result['status'] == 'rejected':
+                result['error'] = '그림이 검사를 통과하지 못했어요. 일기 글은 그대로 남아 있어요.'
         except (GenerationError, OpenAIError, ValidationError, TimeoutError, httpx.TimeoutException) as error:
             reason, upstream_status, _ = failure_details(error)
             timeout = reason == 'timeout' or upstream_status == 504

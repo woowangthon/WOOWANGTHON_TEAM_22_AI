@@ -70,3 +70,19 @@ def test_provider_restores_exact_original_captions_without_model_echo(monkeypatc
     assert 'action_quote' not in fields and 'source_quote' not in fields
     assert [scene.source_quote for scene in plan.scenes] == CAPTIONS
     assert [scene.action_quote for scene in plan.scenes] == CAPTIONS
+
+
+def test_original_caption_can_exceed_legacy_model_quote_limit():
+    captions = [CAPTIONS[0] * 110, *CAPTIONS[1:]]
+    value = candidate()
+    value['scenes'][0]['source_quote'] = captions[0]
+    value['scenes'][0]['action_quote'] = captions[0]
+    assert len(captions[0]) > 1000
+    assert validate_specs(value, captions).scenes[0].source_quote == captions[0]
+
+
+def test_short_complete_action_without_a_prop_is_valid():
+    value = candidate()
+    value['scenes'][0]['action'] = 'The narrator rests.'
+    value['scenes'][0]['objects'] = []
+    assert validate_specs(value, CAPTIONS).scenes[0].action == 'The narrator rests.'

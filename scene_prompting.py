@@ -13,7 +13,8 @@ resolve pronouns by naming the prop. Leave unspecified attributes open. Do not a
 causes, outcomes, emotions, text or symbols. Use the cream mascot only for the narrator.
 Set mode=actual for a grounded physical event. For only wishes, denied or imagined events, or no
 visible event, use mode=neutral, no objects and a neutral narrator on a plain background.
-Return only JSON. Copy original wording only for each object's source_quote. /no_think'''
+Return only JSON. Both action and objects[].name must use ASCII English. Use Korean only in
+objects[].source_quote, copied verbatim. An action without a prop can be short: "The narrator rests." /no_think'''
 
 
 class ObjectSpec(BaseModel):
@@ -36,8 +37,9 @@ class SceneDrafts(BaseModel):
 
 
 class SceneSpec(SceneDraft):
-    source_quote: str = Field(min_length=1, max_length=1000)
-    action_quote: str = Field(min_length=1, max_length=1000)
+    # 서버가 승인된 일기에서 붙이는 인용은 전체 일기 한도까지 가능합니다.
+    source_quote: str = Field(min_length=1, max_length=6000)
+    action_quote: str = Field(min_length=1, max_length=6000)
 
 
 class SceneSpecs(BaseModel):
@@ -54,7 +56,7 @@ def validate_specs(value, captions):
         for index, scene in enumerate(plan.scenes):
             if any(not quote.strip() or not any(c.isalnum() for c in quote) for quote in [scene.source_quote,scene.action_quote]+[o.source_quote for o in scene.objects]):
                 raise ValueError('empty evidence')
-            if scene.mode == 'actual' and len(scene.action.split()) < 4:
+            if scene.mode == 'actual' and len(scene.action.split()) < 3:
                 raise ValueError('physical action sentence required')
             if scene.source_quote not in captions[index] or scene.action_quote not in captions[index]:
                 raise ValueError('action evidence')
