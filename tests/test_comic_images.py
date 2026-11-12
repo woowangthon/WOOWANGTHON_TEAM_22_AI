@@ -87,9 +87,49 @@ def test_expired_board_regenerates(monkeypatch):
     assert router.count==2
 
 
-def test_render_router_preserves_single_attempt_settings():
+@pytest.mark.parametrize('http_status', [200, 500, 502, 503, 504])
+def test_render_comic_settings_limit_image_and_http_attempts(monkeypatch, http_status):
+    monkeypatch.setenv('CLOUDFLARE_API_TOKEN', 'test')
+    monkeypatch.setenv('CLOUDFLARE_ACCOUNT_ID', 'a' * 32)
+    monkeypatch.setenv('CLOUDFLARE_IMAGE_MODEL', '@cf/black-forest-labs/flux-1-schnell')
+    image_calls = []
+    http_calls = []
+    image = board()
+
+    def handle_image(request):
+        http_calls.append(request)
+        return httpx.Response(http_status, json={
+            'success': http_status == 200,
+            'result': {'image': image.split(',', 1)[1]},
+        })
+
+    transport = httpx.MockTransport(handle_image)
+    monkeypatch.setattr('providers.HTTPClient', lambda **options: httpx.Client(
+        transport=transport, **options,
+    ))
+
+    class RenderComicImagesStub:
+        def __init__(self, router):
+            self.router = router
+
+        def generate_rejected_panel(self):
+            # The reported legacy caller falls back to two attempts when the attribute is missing.
+            for _ in range(getattr(self.router, 'comic_image_attempts', 2)):
+                image_calls.append('synthetic scene')
+                self.router._cloudflare_image(image_calls[-1])
+                # The synthetic quality check rejects every generated image.
+
     router = ProviderRouter(comic_image_attempts=1, cloudflare_http_attempts=1)
-    assert router.comic_image_attempts == 1
+    comic = RenderComicImagesStub(router)
+    if http_status == 200:
+        comic.generate_rejected_panel()
+    else:
+        with pytest.raises(ProviderError) as error:
+            comic.generate_rejected_panel()
+        assert error.value.reason == 'image_result_unknown'
+        assert error.value.status_code == http_status
+
+    assert len(image_calls) == len(http_calls) == 1
     assert router.cloudflare_http_attempts == 1
 
 
