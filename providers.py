@@ -99,6 +99,8 @@ class ProviderRouter:
         # 기존 Render factory가 넘기는 인자를 받아 한 번 전송하는 정책을 검증합니다.
         if comic_image_attempts != 1 or cloudflare_http_attempts != 1:
             raise ValueError('comic_image_attempts and cloudflare_http_attempts must both be 1')
+        self.comic_image_attempts = comic_image_attempts
+        self.cloudflare_http_attempts = cloudflare_http_attempts
         self.text_provider = setting('TEXT_PROVIDER', 'groq')
         self.stt_provider = setting('STT_PROVIDER', 'groq')
         self.image_provider = setting('IMAGE_PROVIDER', 'cloudflare')

@@ -87,6 +87,12 @@ def test_expired_board_regenerates(monkeypatch):
     assert router.count==2
 
 
+def test_render_router_preserves_single_attempt_settings():
+    router = ProviderRouter(comic_image_attempts=1, cloudflare_http_attempts=1)
+    assert router.comic_image_attempts == 1
+    assert router.cloudflare_http_attempts == 1
+
+
 @pytest.mark.parametrize('status', [400, 401, 429, 500, 502, 503, 504])
 @pytest.mark.parametrize('router_options', [{}, {'comic_image_attempts': 1, 'cloudflare_http_attempts': 1}])
 def test_cloudflare_json_is_sent_once(monkeypatch, status, router_options):
