@@ -87,11 +87,11 @@ def test_expired_board_regenerates(monkeypatch):
     assert router.count==2
 
 
-@pytest.mark.parametrize('status,count',[(400,1),(401,1),(429,1),(503,2)])
-def test_provider_retry_only_transient_servers(monkeypatch,status,count):
+@pytest.mark.parametrize('status', [400, 401, 429, 500, 502, 503, 504])
+@pytest.mark.parametrize('router_options', [{}, {'comic_image_attempts': 1, 'cloudflare_http_attempts': 1}])
+def test_cloudflare_json_is_sent_once(monkeypatch, status, router_options):
     monkeypatch.setenv('CLOUDFLARE_API_TOKEN','test')
     monkeypatch.setenv('CLOUDFLARE_ACCOUNT_ID','a'*32)
-    monkeypatch.setattr('providers.time.sleep',lambda seconds:None)
     calls=[]
     original=httpx.Client
     def handler(request):
@@ -99,8 +99,10 @@ def test_provider_retry_only_transient_servers(monkeypatch,status,count):
         return httpx.Response(status,json={'success':False,'errors':[{'code':3003,'message':'PRIVATE'}]})
     monkeypatch.setattr('providers.HTTPClient',lambda **kw:original(**kw,transport=httpx.MockTransport(handler)))
     with pytest.raises(ProviderError) as caught:
-        ProviderRouter()._cloudflare_request('planning-model', {}, deadline=time.monotonic() + 60)
-    assert len(calls)==count and 'PRIVATE' not in str(caught.value)
+        ProviderRouter(**router_options)._cloudflare_request('planning-model', {}, deadline=time.monotonic() + 60)
+    assert len(calls) == 1
+    assert caught.value.status_code == status
+    assert 'PRIVATE' not in str(caught.value)
     assert '3003' in str(caught.value)
 
 

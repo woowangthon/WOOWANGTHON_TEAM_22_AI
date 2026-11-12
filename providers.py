@@ -95,7 +95,10 @@ def provider_failure(provider, error):
 
 class ProviderRouter:
     """텍스트/Groq, STT/Groq, 이미지/Cloudflare, TTS/선택을 독립 선택합니다."""
-    def __init__(self):
+    def __init__(self, *, comic_image_attempts=1, cloudflare_http_attempts=1):
+        # 기존 Render factory가 넘기는 인자를 받아 한 번 전송하는 정책을 검증합니다.
+        if comic_image_attempts != 1 or cloudflare_http_attempts != 1:
+            raise ValueError('comic_image_attempts and cloudflare_http_attempts must both be 1')
         self.text_provider = setting('TEXT_PROVIDER', 'groq')
         self.stt_provider = setting('STT_PROVIDER', 'groq')
         self.image_provider = setting('IMAGE_PROVIDER', 'cloudflare')
@@ -201,63 +204,58 @@ class ProviderRouter:
         return token, account
 
     def _cloudflare_request(self, model, payload, *, deadline, image_generation=False):
-        """장면 구성·검토만 일시적 서버 오류에 재시도합니다."""
+        """장면 계획·검토·이미지 요청마다 Cloudflare에 한 번만 전송합니다."""
         token, account = self._cloudflare_credentials()
-        for attempt in range(2):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise ProviderError('Cloudflare: 응답 시간이 초과되었습니다.', reason='timeout', provider='cloudflare')
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProviderError('Cloudflare: 응답 시간이 초과되었습니다.', reason='timeout', provider='cloudflare')
+        try:
+            with HTTPClient(timeout=remaining, follow_redirects=False) as client:
+                response = client.post(f'https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}',
+                                       headers={'Authorization': 'Bearer ' + token}, json=payload)
             try:
-                with HTTPClient(timeout=remaining, follow_redirects=False) as client:
-                    response = client.post(f'https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}',
-                                           headers={'Authorization': 'Bearer ' + token}, json=payload)
-                try:
-                    body = response.json()
-                except ValueError:
-                    body = {}
-                if not isinstance(body, dict):
-                    body = {}
-                # 숫자 오류 코드만 기록합니다. 키·원문·공급자의 오류 메시지는 기록하지 않습니다.
-                errors = body.get('errors', [])
-                codes = [item['code'] for item in errors if isinstance(item, dict)
-                         and type(item.get('code')) is int] if isinstance(errors, list) else []
-                if response.is_error or body.get('success') is False:
-                    logging.getLogger(__name__).warning('cloudflare status=%s codes=%s', response.status_code, codes)
-                    if image_generation and response.status_code >= 500:
-                        raise ProviderError('cloudflare: 그림 생성 결과를 확인하지 못했습니다.',
-                                            reason='image_result_unknown', status_code=response.status_code,
-                                            provider='cloudflare')
-                    if response.status_code in (502, 503, 504) and attempt == 0 and remaining > 3:
-                        time.sleep(1)
-                        continue
-                    messages = ' '.join(item.get('message', '') for item in errors
-                                        if isinstance(item, dict) and isinstance(item.get('message'), str)) if isinstance(errors, list) else ''
-                    if any(term in messages.lower() for term in ('nsfw', 'content safety', 'safety filter')):
-                        raise ProviderError('Cloudflare 안전 필터가 그림 생성을 거절했습니다. 자동 재시도하지 않습니다.',
-                                            reason='response_filtered', status_code=response.status_code, provider='cloudflare')
-                    if response.status_code == 429 and any(code in (4006, 3036) for code in codes):
-                        quota_code = next(code for code in codes if code in (4006, 3036))
-                        raise ProviderError(
-                            'Cloudflare Workers AI의 일일 무료 사용량을 모두 사용했어요. '
-                            '한국 시간 오전 9시에 한도가 초기화된 뒤 다시 시도해 주세요. '
-                            f'(오류 코드: {quota_code})',
-                            reason='quota_exhausted', status_code=429, provider='cloudflare',
-                        )
-                    safe = type('Status', (), {'status_code': response.status_code})()
-                    error = provider_failure('cloudflare', safe)
-                    if codes:
-                        error.args = (str(error) + ' (오류 코드: ' + ','.join(map(str, codes[:3])) + ')',)
-                    raise error
-                return body.get('result', {})
-            except httpx.RequestError as error:
-                failure = provider_failure('cloudflare', error)
-                if image_generation and not isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
-                    raise ProviderError('그림 생성 결과를 확인하지 못했습니다.',
-                                        reason='image_result_unknown',
-                                        status_code=504 if failure.reason == 'timeout' else 502,
-                                        provider='cloudflare') from None
-                raise failure from None
-        raise ProviderError('Cloudflare: 그림 생성에 실패했습니다.')
+                body = response.json()
+            except ValueError:
+                body = {}
+            if not isinstance(body, dict):
+                body = {}
+            # 숫자 오류 코드만 기록합니다. 키·원문·공급자의 오류 메시지는 기록하지 않습니다.
+            errors = body.get('errors', [])
+            codes = [item['code'] for item in errors if isinstance(item, dict)
+                     and type(item.get('code')) is int] if isinstance(errors, list) else []
+            if response.is_error or body.get('success') is False:
+                logging.getLogger(__name__).warning('cloudflare status=%s codes=%s', response.status_code, codes)
+                if image_generation and response.status_code >= 500:
+                    raise ProviderError('cloudflare: 그림 생성 결과를 확인하지 못했습니다.',
+                                        reason='image_result_unknown', status_code=response.status_code,
+                                        provider='cloudflare')
+                messages = ' '.join(item.get('message', '') for item in errors
+                                    if isinstance(item, dict) and isinstance(item.get('message'), str)) if isinstance(errors, list) else ''
+                if any(term in messages.lower() for term in ('nsfw', 'content safety', 'safety filter')):
+                    raise ProviderError('Cloudflare 안전 필터가 그림 생성을 거절했습니다. 자동 재시도하지 않습니다.',
+                                        reason='response_filtered', status_code=response.status_code, provider='cloudflare')
+                if response.status_code == 429 and any(code in (4006, 3036) for code in codes):
+                    quota_code = next(code for code in codes if code in (4006, 3036))
+                    raise ProviderError(
+                        'Cloudflare Workers AI의 일일 무료 사용량을 모두 사용했어요. '
+                        '한국 시간 오전 9시에 한도가 초기화된 뒤 다시 시도해 주세요. '
+                        f'(오류 코드: {quota_code})',
+                        reason='quota_exhausted', status_code=429, provider='cloudflare',
+                    )
+                safe = type('Status', (), {'status_code': response.status_code})()
+                error = provider_failure('cloudflare', safe)
+                if codes:
+                    error.args = (str(error) + ' (오류 코드: ' + ','.join(map(str, codes[:3])) + ')',)
+                raise error
+            return body.get('result', {})
+        except httpx.RequestError as error:
+            failure = provider_failure('cloudflare', error)
+            if image_generation and not isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+                raise ProviderError('그림 생성 결과를 확인하지 못했습니다.',
+                                    reason='image_result_unknown',
+                                    status_code=504 if failure.reason == 'timeout' else 502,
+                                    provider='cloudflare') from None
+            raise failure from None
 
     def _cloudflare_translate(self, text, *, deadline):
         """그림 모델용 한국어→영어 번역. 새 Groq 키나 호출은 필요하지 않습니다."""
