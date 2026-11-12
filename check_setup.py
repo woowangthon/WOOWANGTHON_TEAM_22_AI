@@ -14,6 +14,9 @@ def main():
         ('그림 생성',router.image_provider,'CLOUDFLARE_API_TOKEN' if router.image_provider=='cloudflare' else 'OPENAI_API_KEY'),
         ('음성 출력',router.tts_provider,'OPENAI_API_KEY'),
     ]:
+        if label=='그림 검토' and router.image_provider=='cloudflare':
+            print('만화 시각 검토: cloudflare / '+('키 설정됨' if setting('CLOUDFLARE_API_TOKEN') else 'CLOUDFLARE_API_TOKEN 필요'))
+            continue
         status='비활성화' if provider=='disabled' else ('키 설정됨' if setting(key) else f'{key} 필요')
         print(f'{label}: {provider} / {status}')
     if router.image_provider=='cloudflare':

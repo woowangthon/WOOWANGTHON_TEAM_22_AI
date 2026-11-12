@@ -124,7 +124,7 @@ def test_rejected_question_is_not_spoken(api):
     api.adapter.question_ok=False
     result=api.client.post('/api/voice-chat',json={'messages':[{'role':'child','text':'공놀이 했어.'}]}).json()
     assert result['fallback'] is True
-    assert json.loads(api.adapter.calls[0][1])['input']=='더 들려주고 싶은 이야기가 있어?'
+    assert json.loads(api.adapter.calls[0][1])['input']=='더 말하고 싶으면 이어서 들려줘. 여기까지 적어도 괜찮아.'
 
 
 def test_tts_failure_preserves_question(api):

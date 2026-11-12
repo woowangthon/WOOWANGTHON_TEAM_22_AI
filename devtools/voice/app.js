@@ -1,8 +1,10 @@
 import {Conversation,TurnDetector} from '/dev/voice/core.mjs';
-import {IllustratedDiary,isImageDataURL} from '/dev/voice/illustration.mjs';
+import {IllustratedDiary,isImageDataURL,comicBubble} from '/dev/voice/illustration.mjs';
 import {DrawingPad,drawingDiaryHTML} from '/dev/voice/drawing.mjs';
 
 const $=id=>document.getElementById(id);
+// 현재 개발 화면은 텍스트 전용입니다. URL 옵션으로 음성을 켜지 않습니다.
+const textOnly=true;
 const pending=new Set();
 let active=false,phase='idle',revision=0,stream=null,context=null,analyser=null,source=null;
 let recorder=null,monitor=null,finishRecording=null,utterance=null,speechTimer=null,finishSpeech=null;
@@ -11,6 +13,9 @@ let diaryMessageCount=null;
 let composed=null; // 직접 그린 PNG와 사용자가 확인한 일기. 만화 생성과 별도로 보존합니다.
 
 async function request(path,body){
+  if(textOnly&&['/api/transcribe','/api/speech','/api/voice-chat'].includes(path)){
+    throw new Error('현재는 텍스트 입력만 사용할 수 있어요.');
+  }
   const controller=new AbortController();pending.add(controller);
   const timer=setTimeout(()=>controller.abort(),path==='/api/visual-story/image'?360000:120000);
   try{
@@ -34,6 +39,9 @@ const drawingPad=new DrawingPad($('drawing-canvas'),drawingChanged,showError);
 function setPhase(next,message){
   phase=next;document.body.dataset.phase=next;$('status').textContent=message;
   const busy=['thinking','transcribing','speaking','diary','illustrating'].includes(next);
+  $('text-start').disabled=busy||active;
+  $('text-input').disabled=busy||active||!conversation.messages.length||next==='done';
+  $('text-send').disabled=$('text-input').disabled;
   $('start').disabled=active||busy;
   $('stop').disabled=!active&&!busy;
   $('send-audio').disabled=next!=='listening';
@@ -96,6 +104,7 @@ function fail(error,version){
   stop('연결을 확인한 뒤 다시 시작해 주세요.');showError(error);
 }
 async function ensureMic(){
+  if(textOnly)throw new Error('현재는 텍스트 입력만 사용할 수 있어요.');
   if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)throw new Error('이 브라우저에서 녹음을 지원하지 않습니다. 최신 Chrome에서 localhost 주소로 열어 주세요.');
   if(stream&&stream.getAudioTracks().some(track=>track.readyState==='live'))return;
   const version=revision;
@@ -112,6 +121,7 @@ async function ensureMic(){
   }catch(error){await newContext.close().catch(()=>{});throw error;}
 }
 function say(text){
+  if(textOnly)return Promise.resolve(false);
   cancelSpeech();disableTracks();
   if(!$('read-aloud').checked)return Promise.resolve(true);
   if(!('speechSynthesis' in window)){showError(new Error('기기 음성 출력을 지원하지 않습니다. 질문을 읽고 다시 말하기를 누르세요.'));return Promise.resolve(false);}
@@ -142,6 +152,7 @@ async function handleReply(reply,version){
   else setPhase('paused','질문을 읽고 다시 말하기를 눌러 주세요.');
 }
 async function begin(){
+  if(textOnly)return;
   if(active)return;clearError();active=true;const version=++revision;
   setPhase('thinking','마이크와 AI 연결을 준비하고 있어요.');
   try{
@@ -160,6 +171,7 @@ async function begin(){
   }
 }
 async function listen(){
+  if(textOnly)return;
   if(!active||recorder||conversation.busy)return;
   const version=revision;clearError();
   try{
@@ -245,6 +257,8 @@ function renderPictures(state){
     const card=document.createElement('article');card.className='picture-page';
     const title=document.createElement('h3');title.textContent=`${index+1}컷${scene.repeated?' · 같은 장면':''}`;card.append(title);
     if(scene.status==='generated'&&isImageDataURL(scene.imageUrl)){
+      const line=comicBubble(scene.caption,state.childSources);
+      if(line){const bubble=document.createElement('p');bubble.className='comic-dialogue comic-'+line.kind;bubble.setAttribute('aria-label',line.kind==='thought'?'아이의 생각':'아이가 한 말');bubble.textContent=line.text;card.append(bubble);}
       const image=document.createElement('img');image.src=scene.imageUrl;image.alt=scene.caption;image.loading='lazy';card.append(image);
     }else{
       const placeholder=document.createElement('div');placeholder.className='picture-placeholder';
@@ -277,7 +291,7 @@ async function makeComic(){
   stop('4컷 만화를 준비하고 있어요.');const version=revision;clearError();
   setPhase('illustrating','확인한 일기로 4컷 만화를 만들고 있어요.');
   try{
-    const result=await illustrator.build(composed.text,4,'comic4');
+    const result=await illustrator.build(composed.text,4,'comic4',{childSources:conversation.messages.filter(message=>message.role==='child').map(message=>message.text)});
     if(version!==revision||!result)return;
     const generated=result.scenes.filter(scene=>scene.status==='generated').length;
     setPhase('done',generated===4?'4컷 만화가 준비됐어요. 그림일기와 함께 확인해 주세요.':'내 그림일기는 그대로 있어요. 실패한 만화 컷만 다시 만들 수 있어요.');
@@ -294,6 +308,39 @@ async function retryPicture(index){
   try{await illustrator.retry(index);if(version===revision)setPhase('done','장면 결과를 확인해 주세요.');}
   catch(error){if(version===revision){showError(error);setPhase('done','장면을 다시 만들지 못했어요.');}}
 }
+async function beginText(){
+  if(conversation.busy)return;
+  stop('텍스트 대화를 준비하고 있어요.');clearError();
+  const version=revision;setPhase('thinking','첫 질문을 준비하고 있어요.');
+  try{
+    const status=await request('/api/status');
+    if(version!==revision)return;
+    if(!status.configured)throw new Error('텍스트 공급자의 API 키를 설정하고 서버를 재시작해 주세요.');
+    if(!conversation.messages.length)await conversation.ask();
+    if(version!==revision)return;
+    render();setPhase('paused','답변을 입력한 뒤 보내기를 눌러 주세요.');$('text-input').focus?.();
+  }catch(error){fail(error,version);}
+}
+async function sendText(){
+  if($('text-send').disabled||conversation.busy)return;
+  const text=$('text-input').value.trim();
+  if(!text){showError(new Error('답변을 입력해 주세요.'));return;}
+  const version=revision;clearError();setPhase('thinking','답변을 읽고 있어요.');
+  try{
+    const reply=await conversation.ask(text);
+    if(!reply||version!==revision)return;
+    $('text-input').value='';render();
+    setPhase(reply.finished?'done':'paused',reply.finished?'대화를 마쳤어요. 일기 쓰기 버튼을 눌러 주세요.':'답변을 입력한 뒤 보내기를 눌러 주세요.');
+    if(!reply.finished)$('text-input').focus?.();
+  }catch(error){
+    if(version===revision){showError(error);setPhase('paused','입력한 내용은 남아 있어요. 다시 보낼 수 있어요.');}
+  }
+}
+$('text-start').onclick=beginText;
+$('text-form').onsubmit=event=>{event.preventDefault();return sendText();};
+$('text-input').onkeydown=event=>{
+  if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing&&event.keyCode!==229){event.preventDefault();sendText();}
+};
 $('start').onclick=begin;
 $('stop').onclick=()=>stop();
 $('send-audio').onclick=()=>finishRecording?.();
@@ -336,6 +383,15 @@ $('download').onclick=()=>{
   const url=URL.createObjectURL(new Blob([JSON.stringify({messages:conversation.messages},null,2)],{type:'application/json'}));
   const link=document.createElement('a');link.href=url;link.download='conversation.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 };
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&(active||conversation.busy))stop('화면을 벗어나 마이크를 껐어요. 시작 버튼으로 재개할 수 있어요.');});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&(active||conversation.busy))stop('화면을 벗어나 요청을 중지했어요. 텍스트 대화 시작으로 이어갈 수 있어요.');});
 window.addEventListener('pagehide',()=>stop());
+if(textOnly){
+  document.title='텍스트 대화 테스트';
+  $('page-title').textContent='글로 하루를 이야기해 보세요';
+  $('page-intro').textContent='마이크 없이 입력한 내용으로 AI와 대화하고 일기와 4컷 만화를 확인할 수 있어요.';
+  for(const id of ['start','send-audio','resume','voice-options','level','replay'])$(id).hidden=true;
+  $('read-aloud').checked=false;
+  $('stop').textContent='요청 중지';
+  $('voice-note').textContent='텍스트 대화 시작을 누르면 첫 질문이 나옵니다.';
+}
 setPhase('idle','대화를 시작해 주세요');

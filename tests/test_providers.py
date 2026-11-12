@@ -10,7 +10,7 @@ from openai import OpenAI
 from image_fixture import encoded_image
 from engine import DiaryEngine, GenerationError
 from models import Review
-from providers import ProviderRouter
+from providers import ProviderRouter, cloudflare_prompt
 from server import create_app
 from visual_story import text_hash
 
@@ -108,40 +108,92 @@ def test_status_uses_text_provider_key(router,monkeypatch):
         assert not client.get('/api/status').json()['configured']
 
 
-@pytest.mark.parametrize('accepted',[True,False])
-def test_cloudflare_image_then_groq_vision(router,monkeypatch,accepted):
+@pytest.mark.parametrize('kind',['comic4','storybook'])
+def test_cloudflare_plan_and_images_never_call_groq_or_openai(router,monkeypatch,kind):
+    monkeypatch.delenv('GROQ_API_KEY',raising=False)
+    monkeypatch.delenv('OPENAI_API_KEY',raising=False)
+    def forbidden(*args,**kwargs):
+        raise AssertionError('Cloudflare generation must not call a text or vision model')
+    monkeypatch.setattr(router,'parse',forbidden)
+    monkeypatch.setattr(router,'_review_image',forbidden)
+    monkeypatch.setattr('comic_images.has_lettering', lambda data:False)
     calls=[]
-    jpeg=encoded_image('JPEG')
-    def groq_handler(request):
-        body=json.loads(request.read());calls.append(body)
-        if len(calls)==1:
-            return httpx.Response(200,json=completion({'description':'Watercolor silhouette of a child playing ball. Blank background.'}))
-        assert body['model']=='qwen/qwen3.8-27b'
-        assert body['response_format']=={'type':'json_object'}
-        assert body['messages'][1]['content'][1]['image_url']['url'].endswith(jpeg)
-        return httpx.Response(200,json=completion({'accepted':accepted}))
-    bind_groq(router,groq_handler)
     original_client=httpx.Client
-    def cloudflare_handler(request):
+    def handler(request):
         assert request.url.host=='api.cloudflare.com'
-        assert request.url.path.endswith('/@cf/black-forest-labs/flux-1-schnell')
         assert request.headers['authorization']=='Bearer cf-test'
         body=json.loads(request.read())
-        assert len(body['prompt'])<=2048 and body['steps']==4
-        return httpx.Response(200,json={'success':True,'result':{'image':jpeg}})
+        if 'messages' in body and isinstance(body['messages'][1]['content'],list):
+            review_text = body['messages'][1]['content'][0]['text']
+            evidence = json.loads(review_text.split(': ', 1)[1])
+            assert evidence['captions'][evidence['scene']['index']]
+            assert 'action_quote' not in evidence['scene'] and 'source_quote' not in evidence['scene']
+            return httpx.Response(200,json={'success':True,'result':completion({**{name:True for name in ('objects','action','appearance','grounding','lettering','composition','character')},'object_counts':[1]})})
+        if 'messages' in body:
+            captions=json.loads(body['messages'][1]['content'])['captions']
+            specs={'scenes':[{'index':i,'objects':[{'name':'blocks','source_quote':caption}],
+                             'action':'The narrator stacks blocks.','mode':'actual'}
+                            for i,caption in enumerate(captions)]}
+            return httpx.Response(200,json={'success':True,'result':completion(specs)})
+        assert len(body['prompt'])<=2048 and body['steps']==8
+        if kind=='storybook':assert json.loads(body['prompt'].split('\n',1)[1])['selected_text']
+        else:assert 'Main visible objects: blocks' in body['prompt']
+        calls.append(body['prompt'])
+        from PIL import Image
+        import io
+        stream=io.BytesIO();Image.new('RGB',(512,512),'white').save(stream,format='JPEG')
+        return httpx.Response(200,json={'success':True,'result':{'image':base64.b64encode(stream.getvalue()).decode()}})
     monkeypatch.setattr('providers.HTTPClient',lambda **kw:original_client(
-        **kw,transport=httpx.MockTransport(cloudflare_handler)))
-    try:
-        with TestClient(create_app(DiaryEngine(router))) as client:
-            response=client.post('/api/visual-story/image',json={
-                'diary_text':'공놀이를 했다.', 'diary_hash':text_hash('공놀이를 했다.'),
-                'source_ids':[0], 'format':'storybook','confirmed':True})
+        **kw,transport=httpx.MockTransport(handler)))
+    text='집에서 블록을 쌓았다. 탑이 무너졌다. 밑을 넓게 만들었다. 다시 쌓았다. 탑이 완성되었다. 기뻤다.'
+    with TestClient(create_app(DiaryEngine(router))) as client:
+        response=client.post('/api/visual-story',json={'diary_text':text,'format':kind,'confirmed':True})
         assert response.status_code==200
-        assert response.json()['status']==('generated' if accepted else 'rejected')
-        assert bool(response.json()['imageUrl'])==accepted
-        assert response.json()['caption']=='공놀이를 했다.'
-        assert len(calls)==2
-    finally:router.groq.close()
+        plan=response.json()
+        assert plan[kind]['planning_mode']=='deterministic'
+        assert plan[kind]['notices']
+        for scene in plan[kind]['scenes']:
+            rendered=client.post('/api/visual-story/image',json={
+                'diary_text':text,'diary_hash':plan['diary_hash'],
+                'source_ids':scene['source_ids'],'format':kind,'confirmed':True})
+            assert rendered.status_code==200
+            result=rendered.json()
+            assert result['status']=='generated'
+            assert result['imageUrl'].startswith('data:image/jpeg;base64,')
+            assert result['caption']==scene['caption']
+            assert result['source_ids']==scene['source_ids']
+            assert result['requires_confirmation'] is True
+    assert len(calls)==4
+    assert 'groq' not in router.__dict__ and 'openai' not in router.__dict__
+
+
+def test_cloudflare_prompt_preserves_selected_source_when_context_is_too_long():
+    selected='“공원은 아니고 집이야”라고 말했다. 블록을 쌓았다.'
+    prompt=cloudflare_prompt({'format':'comic4','selected_text':selected,'diary_context':'긴 일기'*1500})
+    source=json.loads(prompt.split('\n',1)[1])
+    assert source=={'selected_text':selected}
+    assert len(prompt)<=2048
+    assert 'cream bean-shaped mascot' in prompt
+
+
+def test_cloudflare_prompt_rejects_long_scene_without_truncation():
+    with pytest.raises(GenerationError,match='입력 한도'):
+        cloudflare_prompt({'selected_text':'가'*2048})
+
+
+def test_cloudflare_failure_keeps_image_response_contract(router,monkeypatch):
+    original_client=httpx.Client
+    monkeypatch.setattr('providers.HTTPClient',lambda **kw:original_client(
+        **kw,transport=httpx.MockTransport(lambda request:httpx.Response(429,json={'error':'private'}))))
+    text='블록을 쌓았다.'
+    with TestClient(create_app(DiaryEngine(router))) as client:
+        response=client.post('/api/visual-story/image',json={
+            'diary_text':text,'diary_hash':text_hash(text),'source_ids':[0],
+            'format':'comic4','confirmed':True})
+    assert response.status_code==200
+    assert response.json()['status']=='failed'
+    assert response.json()['imageUrl'] is None
+    assert 'private' not in response.text
 
 
 def test_missing_cloudflare_key_fails_before_any_network(router,monkeypatch):

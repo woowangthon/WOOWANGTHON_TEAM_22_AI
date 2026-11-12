@@ -98,7 +98,8 @@ class DiaryEngine:
         last_child = child_messages[-1]['text'].strip()
         if re.fullmatch(
             r'(?:이제\s*)?(?:그만할래|그만하고 싶어|끝낼래|끝내고 싶어)'
-            r'[.!。]?\s*(?:일기로\s*만들어\s*줘[.!。]?)?', last_child
+            r'[.!。]?\s*(?:일기로\s*만들어\s*줘[.!。]?)?'
+            r'|(?:이제\s*)?일기로\s*만들어\s*줘[.!。]?', last_child
         ):
             return {'question': '알겠어. 하단 버튼으로 일기를 확인해 줘.',
                     'finished': True, 'mock': self.mock, 'fallback': False}
@@ -107,14 +108,18 @@ class DiaryEngine:
             examples = ['그때 어떤 일이 있었는지 더 들려줄래?', '그때 어떤 기분이 들었어?', '더 남기고 싶은 이야기가 있어?']
             return {'question':examples[min(len(child_messages)-1,2)], 'finished':False, 'mock':True}
         candidate = self.adapter.parse(CHAT_PROMPT, {'conversation':conversation}, QuestionCandidate)
-        review = self.adapter.parse(CHAT_REVIEW, {'conversation':conversation,'candidate':candidate.model_dump()}, Review)
         normalize = lambda text: re.sub(r'[^가-힣a-z0-9]', '', text.lower())
         previous = {normalize(item['text']) for item in conversation if item['role'] == 'assistant'}
-        accepted = (review.accepted and bool(candidate.question.strip()) and len(candidate.question) <= 150
-                    and normalize(candidate.question) not in previous)
-        alternatives = ['더 들려주고 싶은 이야기가 있어?', '다른 이야기도 남기고 싶어?',
-                        '이야기를 더 하거나 여기서 일기를 확인해도 괜찮아.']
-        replacement = next((text for text in alternatives if normalize(text) not in previous), alternatives[-1])
+        # 코드에서 확실히 거절할 수 있는 후보는 외부 검토에 보내지 않습니다.
+        question = candidate.question.strip()
+        accepted = False
+        if question and len(candidate.question) <= 150 and normalize(question) not in previous:
+            review = self.adapter.parse(
+                CHAT_REVIEW, {'conversation': conversation, 'candidate': candidate.model_dump()}, Review
+            )
+            accepted = review.accepted
+        # 검토에서 떨어진 질문 뒤에 다른 질문을 던져 답을 재촉하지 않습니다.
+        replacement = '더 말하고 싶으면 이어서 들려줘. 여기까지 적어도 괜찮아.'
         return {'question':candidate.question if accepted else replacement,
                 'finished':candidate.finished if accepted else False, 'mock':False, 'fallback':not accepted}
 
@@ -188,8 +193,6 @@ class DiaryEngine:
                     log('info', 'accepted', attempt, 'review')
                     break
                 log('warning', 'review_rejected', attempt, 'review')
-                payload = {'conversation': conversation, 'sources': sources,
-                           'previous_candidate': candidate.model_dump()}
         if fallback:
             sentences = [{'text':source['text'],'source_ids':[source['id']]} for source in sources]
         page_size = max(1, (len(sentences)+5)//6)  # 최대 6페이지로 묶되 원문/문장을 버리지 않습니다.

@@ -1,9 +1,9 @@
-// 실제 마이크·브라우저·API를 사용하지 않고 녹음/확인/응답/중지 연결을 검사합니다.
+// 실제 브라우저·API 없이 텍스트 대화·재시도·일기·만화와 음성 호출 차단을 검사합니다.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
-test('microphone turn, transcript confirmation, next question, diary, and cleanup',async()=>{
+test('text-only conversation, retry, diary, and comic without audio calls',async()=>{
   const nodes=new Map();
   const listeners={};
   const picture='data:image/png;base64,iVBORw0KGgo=';
@@ -16,30 +16,17 @@ test('microphone turn, transcript confirmation, next question, diary, and cleanu
   get('draft-panel').hidden=true;get('silence').value='3000';
   globalThis.document={getElementById:get,createElement:element,body:{dataset:{}},addEventListener(){}};
   globalThis.window=globalThis;globalThis.addEventListener=()=>{};
-  let stopped=0,latest,transcriptions=0;const spoken=[],requests=[];
+  const requests=[];
   const hash='a'.repeat(64);
-  let imageAttempt=0;
-  const track={readyState:'live',enabled:false,stop(){stopped++;this.readyState='ended';}};
+  let imageAttempt=0,failChat=false;
   Object.defineProperty(globalThis,'navigator',{configurable:true,value:{mediaDevices:{
-    async getUserMedia(){return {getTracks:()=>[track],getAudioTracks:()=>[track]};}}}});
-  globalThis.AudioContext=class{
-    state='running';resume(){return Promise.resolve();}close(){return Promise.resolve();}
-    createAnalyser(){return {fftSize:2048,getFloatTimeDomainData(a){a.fill(0);}};}
-    createMediaStreamSource(){return {connect(){},disconnect(){}};}
-  };
-  globalThis.MediaRecorder=class{
-    static isTypeSupported(t){return t.startsWith('audio/webm');}
-    state='inactive';constructor(stream,options){this.mimeType=options.mimeType;latest=this;}
-    start(){this.state='recording';}
-    stop(){this.state='inactive';this.ondataavailable?.({data:new Blob(['fake-audio'])});this.onstop?.();}
-  };
-  globalThis.SpeechSynthesisUtterance=class{constructor(text){this.text=text;}};
-  globalThis.speechSynthesis={getVoices:()=>[{lang:'ko-KR',localService:true}],cancel(){},
-    speak(u){spoken.push(u.text);setImmediate(()=>u.onend());}};
+    async getUserMedia(){assert.fail('Text mode must not open the microphone');}}}});
+  globalThis.MediaRecorder=class{constructor(){assert.fail('Text mode must not record');}};
+  globalThis.speechSynthesis={cancel(){},speak(){assert.fail('Text mode must not speak');}};
   globalThis.fetch=async(path,options)=>{
     requests.push({path,body:options.body});let body;
     if(path==='/api/status')body={mode:'openai',configured:true};
-    else if(path==='/api/transcribe'){transcriptions++;body={text:'친구와 공놀이를 했어.',requires_confirmation:true};}
+    else if(path==='/api/chat'&&failChat){failChat=false;throw new Error('Synthetic network failure');}
     else if(path==='/api/chat')body={question:JSON.parse(options.body).messages.length?'기분이 어땠어?':'오늘은 무슨 일이 있었어?',finished:false};
     else if(path==='/api/diary')body={text:'친구와 공놀이를 했다.',fallback:false};
     else if(path==='/api/visual-story')body={diary_text:'친구와 공놀이를 했다.',diary_hash:hash,comic4:{notices:[],scenes:
@@ -54,20 +41,25 @@ test('microphone turn, transcript confirmation, next question, diary, and cleanu
   const illustration=new URL('../devtools/voice/illustration.mjs',import.meta.url).href;
   const drawing=new URL('../devtools/voice/drawing.mjs',import.meta.url).href;
   await import('data:text/javascript;base64,'+Buffer.from(source.replace('/dev/voice/core.mjs',core).replace('/dev/voice/illustration.mjs',illustration).replace('/dev/voice/drawing.mjs',drawing)).toString('base64'));
-  await get('start').onclick();
-  assert.equal(latest.state,'recording');assert.equal(track.enabled,true);
-  assert.deepEqual(spoken,['오늘은 무슨 일이 있었어?']);
-  get('send-audio').onclick();
-  for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(transcriptions,1);assert.equal(track.enabled,false);
-  assert.equal(get('draft-panel').hidden,false);assert.equal(get('draft').value,'친구와 공놀이를 했어.');
-  assert.equal(requests.filter(r=>r.path==='/api/chat').length,1); // 확인 전에는 질문을 만들지 않습니다.
-  get('draft').value='친구와 공놀이를 했어. 즐거웠어.';
-  await get('confirm').onclick();
-  assert.equal(latest.state,'recording');assert.equal(get('draft-panel').hidden,true);
+  assert.equal(get('start').hidden,true);
+  assert.equal(get('read-aloud').checked,false);
+  await get('start').onclick(); // 숨겨진 이전 버튼을 직접 호출해도 음성을 시작하지 않습니다.
+  assert.equal(requests.length,0);
+  await get('text-start').onclick();
+  assert.equal(requests.filter(r=>r.path==='/api/chat').length,1);
+  get('text-input').value='친구와 공놀이를 했어. 즐거웠어.';
+  // 한글 조합 중 Enter는 전송하지 않습니다.
+  get('text-input').onkeydown({key:'Enter',isComposing:true,preventDefault(){assert.fail();}});
+  assert.equal(requests.filter(r=>r.path==='/api/chat').length,1);
+  failChat=true;
+  await get('text-form').onsubmit({preventDefault(){}});
+  assert.equal(get('text-input').value,'친구와 공놀이를 했어. 즐거웠어.');
+  await get('text-form').onsubmit({preventDefault(){}});
   const submitted=JSON.parse(requests.filter(r=>r.path==='/api/chat').at(-1).body);
+  assert.equal(submitted.messages.length,2); // 재시도에도 아이 발언은 한 번만 추가합니다.
   assert.equal(submitted.messages[1].text,'친구와 공놀이를 했어. 즐거웠어.');
-  get('stop').onclick();assert.equal(track.readyState,'ended');assert.ok(stopped>=1);
+  assert.equal(get('text-input').value,'');
+  assert.ok(requests.every(r=>!['/api/transcribe','/api/speech','/api/voice-chat'].includes(r.path)));
   await get('diary').onclick();assert.equal(get('diary-text').textContent,'친구와 공놀이를 했다.');
   assert.equal(get('diary-panel').hidden,false);
   assert.equal(get('diary-edit').value,'친구와 공놀이를 했다.');

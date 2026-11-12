@@ -6,7 +6,7 @@ from pydantic import ValidationError
 
 REASONS = frozenset({
     'quota_exhausted', 'rate_limit', 'authentication', 'permission', 'invalid_request',
-    'provider_server_error', 'timeout', 'connection', 'response_schema_invalid',
+    'provider_server_error', 'image_result_unknown', 'timeout', 'connection', 'response_schema_invalid',
     'response_incomplete', 'response_truncated', 'response_filtered', 'empty_response',
     'configuration', 'provider_error', 'unexpected_error',
 })

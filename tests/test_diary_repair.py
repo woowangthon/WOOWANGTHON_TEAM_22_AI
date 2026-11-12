@@ -55,7 +55,7 @@ def test_review_rejection_repairs_corrected_facts_and_preserves_all_sources(capl
     assert body['sources'] == [{'id': i, 'text': m.text} for i, m in enumerate(messages) if m.role == 'child']
     assert len(adapter.calls) == 4
     repair_payload = adapter.calls[2][0]
-    assert repair_payload['previous_candidate'] == rejected.model_dump()
+    assert 'previous_candidate' not in repair_payload
     assert repair_payload['sources'] == body['sources']
     assert repair_payload['conversation'] == [m.model_dump() for m in messages]
     assert 'outcome=review_rejected attempt=1' in caplog.text

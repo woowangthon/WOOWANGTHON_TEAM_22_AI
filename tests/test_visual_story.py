@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from openai import OpenAI
 
 from image_fixture import encoded_image
-from engine import DiaryEngine, GenerationError
+from engine import DiaryEngine, GenerationError, ProviderError
 from server import create_app
 from visual_models import ScenePlan, SceneGroup
 from visual_story import VisualStoryService, text_hash
@@ -182,3 +182,21 @@ def test_scene_key_distinguishes_formats(mock_api):
     body['format']='storybook'
     book=mock_api.post('/api/visual-story/image',json=body).json()
     assert comic['scene_key']!=book['scene_key']
+
+
+@pytest.mark.parametrize(('error', 'status'), [
+    (httpx.ReadTimeout('private-provider-detail'), 504),
+    (ProviderError('private-provider-detail', reason='timeout'), 504),
+    (ProviderError('private-provider-detail', reason='image_result_unknown', status_code=503), 503),
+])
+def test_uncertain_image_result_uses_non_success_status(monkeypatch, error, status):
+    def fail(*args):
+        raise error
+
+    monkeypatch.setattr(VisualStoryService, '_generate_image', fail)
+    with TestClient(create_app(DiaryEngine(FakeAdapter()))) as client:
+        response = client.post('/api/visual-story/image', json=image_body())
+    assert response.status_code == status
+    assert response.headers['Cache-Control'] == 'no-store'
+    assert response.json()['detail']['code'] == 'IMAGE_RESULT_UNKNOWN'
+    assert 'private-provider-detail' not in response.text
