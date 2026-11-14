@@ -13,7 +13,7 @@ test('explicit thought keeps its wording and is distinguished from speech',()=>{
   const caption='나는 마음속으로 “내일 또 하고 싶어”라고 생각했다.';
   assert.deepEqual(comicBubble(caption,['나는 마음속으로 “내일 또 하고 싶어”라고 생각했어.']),{text:'내일 또 하고 싶어',kind:'thought'});
   const html=comicArtworkHTML({caption,imageUrl:image},['내일 또 하고 싶어']);
-  assert.ok(html.includes('comic-thought')&&html.includes('아이의 생각'));
+  assert.ok(!html.includes('comic-dialogue')&&html.includes('<img'));
 });
 test('other speakers, assistant messages and negated speech are excluded',()=>{
   for(const caption of ['친구가 “잘했어!”라고 말했다.','민수가 “잘했어!”라고 말했다.','“잘했어!”라고 친구가 말했다.','나는 “잘했어!”라고 말하지 않았다.']){
@@ -30,9 +30,9 @@ test('long text is omitted rather than truncated, and markup is escaped',()=>{
   const html=comicArtworkHTML({caption:'나는 “<script>”라고 말했다.',imageUrl:image},['<script>']);
   assert.ok(html.includes('&lt;script&gt;')&&!html.includes('<script>'));
 });
-test('export retains verified bubbles only when source texts are present',()=>{
+test('export omits bubbles even with verified source text',()=>{
   const diary=new IllustratedDiary(()=>{});
   diary.state={format:'comic4',diary_text:'나는 “해냈어!”라고 말했다.',childSources:['해냈어!'],created_at:'example',scenes:[{caption:'나는 “해냈어!”라고 말했다.',imageUrl:image}]};
-  assert.ok(diary.html().includes('comic-speech'));
+  assert.ok(!diary.html().includes('comic-speech'));
   diary.state.childSources=[];assert.ok(!diary.html().includes('class="comic-dialogue comic-speech"'));
 });

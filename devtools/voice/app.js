@@ -1,5 +1,5 @@
 import {Conversation,TurnDetector} from '/dev/voice/core.mjs';
-import {IllustratedDiary,isImageDataURL,comicBubble} from '/dev/voice/illustration.mjs';
+import {IllustratedDiary,isImageDataURL} from '/dev/voice/illustration.mjs';
 import {DrawingPad,drawingDiaryHTML} from '/dev/voice/drawing.mjs';
 
 const $=id=>document.getElementById(id);
@@ -263,12 +263,10 @@ function renderPictures(state){
     const card=document.createElement('article');card.className='picture-page';
     const title=document.createElement('h3');title.textContent=`${index+1}컷${scene.repeated?' · 같은 장면':''}`;card.append(title);
     if(scene.status==='generated'&&isImageDataURL(scene.imageUrl)){
-      const line=comicBubble(scene.caption,state.childSources);
-      if(line){const bubble=document.createElement('p');bubble.className='comic-dialogue comic-'+line.kind;bubble.setAttribute('aria-label',line.kind==='thought'?'아이의 생각':'아이가 한 말');bubble.textContent=line.text;card.append(bubble);}
       const image=document.createElement('img');image.src=scene.imageUrl;image.alt=scene.caption;image.loading='lazy';card.append(image);
     }else{
       const placeholder=document.createElement('div');placeholder.className='picture-placeholder';
-      placeholder.textContent=scene.status==='generating'?'그림을 만들고 원문과 비교하고 있어요…':scene.status==='waiting'?'앞 장면이 끝나면 만들어요.':scene.error||'그림을 만들지 못했어요.';
+      placeholder.textContent=scene.status==='generating'?'그림을 만들고 있어요…':scene.status==='waiting'?'앞 장면이 끝나면 만들어요.':scene.error||'그림을 만들지 못했어요.';
       card.append(placeholder);
       if(!illustrator.busy&&scene.status!=='unknown'){
         const retry=document.createElement('button');retry.textContent=scene.repeated?'원본 컷 다시 만들기':'이 컷만 다시 만들기';

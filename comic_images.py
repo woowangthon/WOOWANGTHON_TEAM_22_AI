@@ -3,6 +3,7 @@ import base64
 import hashlib
 import io
 import json
+import logging
 import re
 import threading
 import time
@@ -11,6 +12,7 @@ from dataclasses import dataclass, field
 
 from PIL import Image
 from engine import ProviderError
+from image_quality import remove_lettering
 from scene_prompting import SceneSpecs, scene_prompt
 
 
@@ -21,7 +23,7 @@ def visual_text(caption):
 
 # Cloudflare 요금표를 바탕으로 한 계획용 예약치이며 실제 청구량과는 다릅니다.
 COMIC_NEURON_BUDGET = 2500
-PLAN_NEURON_RESERVE = 600
+PLAN_NEURON_RESERVE = 650
 PANEL_NEURON_RESERVE = 300  # 컷별 생성에 남겨 두는 보수적인 예약치입니다.
 
 
@@ -106,7 +108,12 @@ class ComicImages:
             data = self.router._cloudflare_image(prompt, deadline=deadline)
             if time.monotonic() >= deadline:
                 raise ProviderError('만화 생성 시간이 초과되었습니다.', reason='timeout')
-            tiles[index] = data
+            # Local cleanup only. An OCR problem must not discard an already generated panel.
+            try:
+                tiles[index] = remove_lettering(data)
+            except ProviderError:
+                logging.getLogger(__name__).warning('comic text_cleanup=unavailable panel=%d', index)
+                tiles[index] = data
 
             size = sum(len(tile or '') for tile in tiles)
             if size > self.max_bytes:

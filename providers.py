@@ -291,7 +291,7 @@ class ProviderRouter:
             setting('CLOUDFLARE_SCENE_MODEL', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'),
             {'messages': [{'role': 'system', 'content': instruction},
                           {'role': 'user', 'content': json.dumps({'captions': captions}, ensure_ascii=False)}],
-             'max_tokens': 2200, 'temperature': 0.1, 'response_format': {'type': 'json_schema', 'json_schema': schema}},
+             'max_tokens': 2600, 'temperature': 0.1, 'response_format': {'type': 'json_schema', 'json_schema': schema}},
             deadline=min(deadline, time.monotonic() + 55))
         try:
             choices = result.get('choices') if isinstance(result, dict) else None

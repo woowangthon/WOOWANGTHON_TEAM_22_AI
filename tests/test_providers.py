@@ -125,6 +125,7 @@ def test_cloudflare_plan_and_images_never_call_groq_or_openai(router,monkeypatch
         if 'messages' in body and isinstance(body['messages'][1]['content'], list):
             pytest.fail('Cloudflare comic must not call post-generation visual review')
         if 'messages' in body:
+            assert body['max_tokens']==2600
             captions=json.loads(body['messages'][1]['content'])['captions']
             specs={'scenes':[{'index':i,'objects':[{'name':'blocks','source_quote':caption}],
                              'action':'The narrator stacks blocks.','mode':'actual'}

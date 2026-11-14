@@ -56,12 +56,10 @@ export function comicBubble(caption,childSources=[]){
 
 // 기존 JS 함수 호출부와의 호환용 래퍼입니다. 출처가 없으면 말풍선을 표시하지 않습니다.
 export const comicDialogue=(caption,childSources=[])=>comicBubble(caption,childSources)?.text||'';
-export function comicArtworkHTML(scene,childSources=[]){
+export function comicArtworkHTML(scene){
   if(!isImageDataURL(scene.imageUrl))return `<p class="note">${escapeHTML(scene.error||'그림이 아직 생성되지 않았습니다.')}</p>`;
-  const bubble=comicBubble(scene.caption,childSources);
-  return `<div class="comic-art">${bubble?`<p class="comic-dialogue comic-${bubble.kind}" aria-label="${bubble.kind==='thought'?'아이의 생각':'아이가 한 말'}">${escapeHTML(bubble.text)}</p>`:''}<img src="${scene.imageUrl}" alt="${escapeHTML(scene.caption)}"></div>`;
+  return `<div class="comic-art"><img src="${scene.imageUrl}" alt="${escapeHTML(scene.caption)}"></div>`;
 }
-export const COMIC_DIALOGUE_CSS='.comic-dialogue{position:relative;box-sizing:border-box;background:#fffef7;color:#493c32;border:2px solid #68513f;border-radius:18px;padding:10px 14px;margin:8px 8px 14px;font-size:15px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}.comic-thought{border-style:dashed;border-radius:28px}.comic-dialogue:after{content:"";position:absolute;bottom:-8px;left:24px;width:12px;height:12px;background:#fffef7;border-right:2px solid #68513f;border-bottom:2px solid #68513f;transform:rotate(45deg)}'+'.comic-thought:after{border:2px dotted #68513f;border-radius:50%;width:10px;height:10px;transform:none;bottom:-10px;left:24px}.comic-thought:before{content:"";position:absolute;width:5px;height:5px;border:1px solid #68513f;border-radius:50%;background:#fffef7;bottom:-18px;left:18px}';
 
 export class IllustratedDiary {
   constructor(request,onChange=()=>{}){this.request=request;this.onChange=onChange;this.state=null;this.busy=false;this.version=0;}
@@ -163,9 +161,9 @@ export class IllustratedDiary {
     if(!this.state)throw new Error('먼저 그림일기를 만들어 주세요.');
     const {scenes,diary_text,created_at}=this.state;
     return `<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>그림일기</title>
-<style>${COMIC_DIALOGUE_CSS}body{font:18px/1.8 -apple-system,BlinkMacSystemFont,sans-serif;color:#273b30;background:#f4f5ef;margin:0}main{max-width:760px;margin:auto;padding:32px 20px}article{background:white;padding:24px;border:1px solid #d9e0d5;border-radius:14px;margin:24px 0;break-inside:avoid}img{display:block;width:100%;height:auto;border-radius:8px}p{white-space:pre-wrap;overflow-wrap:anywhere}.note{font-size:13px;color:#657364}@media print{body{background:white}article{break-after:page;border:0}summary{display:none}details>p{display:block}}</style>
+<style>body{font:18px/1.8 -apple-system,BlinkMacSystemFont,sans-serif;color:#273b30;background:#f4f5ef;margin:0}main{max-width:760px;margin:auto;padding:32px 20px}article{background:white;padding:24px;border:1px solid #d9e0d5;border-radius:14px;margin:24px 0;break-inside:avoid}img{display:block;width:100%;height:auto;border-radius:8px}p{white-space:pre-wrap;overflow-wrap:anywhere}.note{font-size:13px;color:#657364}@media print{body{background:white}article{break-after:page;border:0}summary{display:none}details>p{display:block}}</style>
 <main><h1>${this.state.format==='comic4'?'AI 4컷 만화':'그림일기'}</h1><p class="note">출력 생성 시각: ${escapeHTML(created_at)} · 기록한 사건의 날짜를 뜻하지 않습니다.</p>
-<div style="${this.state.format==='comic4'?'display:grid;grid-template-columns:1fr 1fr;gap:16px':''}">${scenes.map((scene,i)=>`<article><h2>${i+1}번째 장면</h2>${this.state.format==='comic4'?comicArtworkHTML(scene,this.state.childSources):isImageDataURL(scene.imageUrl)?`<img src="${scene.imageUrl}" alt="${escapeHTML(scene.caption)}">`:`<p class="note">${escapeHTML(scene.error||'그림이 아직 생성되지 않았습니다.')}</p>`}<p>${escapeHTML(scene.caption)}</p></article>`).join('')}</div>
+<div style="${this.state.format==='comic4'?'display:grid;grid-template-columns:1fr 1fr;gap:16px':''}">${scenes.map((scene,i)=>`<article><h2>${i+1}번째 장면</h2>${this.state.format==='comic4'?comicArtworkHTML(scene):isImageDataURL(scene.imageUrl)?`<img src="${scene.imageUrl}" alt="${escapeHTML(scene.caption)}">`:`<p class="note">${escapeHTML(scene.error||'그림이 아직 생성되지 않았습니다.')}</p>`}<p>${escapeHTML(scene.caption)}</p></article>`).join('')}</div>
 <details><summary>일기 글 보기</summary><p>${escapeHTML(diary_text)}</p></details><p class="note">확인한 일기를 바탕으로 만든 AI 삽화입니다. 원문과 다른 부분이 없는지 확인해 주세요.</p></main></html>`;
   }
 }

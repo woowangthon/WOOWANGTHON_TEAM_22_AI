@@ -353,16 +353,16 @@ def test_invalid_scene_plan_repairs_before_any_image_request():
 
 
 def test_plan_budget_preserves_all_four_first_image_calls():
-    from comic_images import ComicRun
+    from comic_images import ComicRun, PANEL_NEURON_RESERVE, PLAN_NEURON_RESERVE
 
     run = ComicRun(created_at=100.0, panel_count=4)
-    run.reserve(600, preserve_first_pass=True)
-    run.reserve(600, preserve_first_pass=True)
+    run.reserve(PLAN_NEURON_RESERVE, preserve_first_pass=True)
+    run.reserve(PLAN_NEURON_RESERVE, preserve_first_pass=True)
     with pytest.raises(ProviderError, match='생성 예산'):
-        run.reserve(600, preserve_first_pass=True)
+        run.reserve(PLAN_NEURON_RESERVE, preserve_first_pass=True)
     for _ in range(4):
-        run.reserve(300, preserve_first_pass=False)
-    assert run.reserved_neurons == 2400
+        run.reserve(PANEL_NEURON_RESERVE, preserve_first_pass=False)
+    assert run.reserved_neurons == 2500
 
 
 def test_unknown_panel_stays_blocked_after_short_failure_cache_expires(monkeypatch):
@@ -389,3 +389,16 @@ def test_unknown_panel_stays_blocked_after_short_failure_cache_expires(monkeypat
     assert error.value.reason == 'image_result_unknown'
     assert images.panel(captions, 1)
     assert router.calls == 2
+
+
+def test_text_cleanup_preserves_panel_if_local_ocr_fails(monkeypatch):
+    class Router(FakeSceneRouter):
+        def _cloudflare_image(self, *args, **kwargs):
+            return board()
+
+    def unavailable(_):
+        raise ProviderError('private OCR details')
+
+    monkeypatch.setattr('comic_images.remove_lettering', unavailable)
+    images = ComicImages(Router())
+    assert images.panel(['장면'] * 4, 0) == board()
