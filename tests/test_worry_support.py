@@ -140,3 +140,22 @@ def test_bad_model_response_is_unavailable_without_retry(monkeypatch):
         ]})
     assert response.json()['status'] == 'unavailable'
     assert len(adapter.calls) == 1
+
+
+def test_mock_worry_demo_moves_from_listening_to_choices():
+    messages = []
+    with TestClient(create_app(DiaryEngine(Adapter(), mock=True))) as client:
+        for child_text, expected in [
+            ('친구랑 싸웠어.', '더 들려주고'),
+            ('내가 말하는데 친구가 말을 끊었어.', '어떤 기분'),
+            ('서운했어.', '한 줄 써 봐'),
+        ]:
+            messages.append({'role': 'child', 'text': child_text})
+            answer = client.post('/api/worry/chat', json={'messages': messages}).json()
+            assert answer['status'] == 'reply'
+            assert answer['mock'] is True
+            assert expected in answer['message']
+            messages.append({'role': 'assistant', 'text': answer['message']})
+
+    assert '한마디로 말하거나' in answer['message']
+    assert '어떤 방법이 더 편할 것 같아?' in answer['message']
