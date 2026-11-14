@@ -11,6 +11,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 
 from PIL import Image
+from diagnostics import failure_details
 from engine import ProviderError
 from image_quality import remove_lettering
 from scene_prompting import SceneSpecs, scene_prompt
@@ -24,6 +25,10 @@ def visual_text(caption):
 # Cloudflare 요금표를 바탕으로 한 계획용 예약치이며 실제 청구량과는 다릅니다.
 COMIC_NEURON_BUDGET = 2500
 PLAN_NEURON_RESERVE = 650
+COMIC_PANEL_SECONDS = 100
+COMIC_PLAN_SECONDS = 20
+COMIC_LOCK_SECONDS = 3
+COMIC_IMAGE_STEPS = 4
 PANEL_NEURON_RESERVE = 300  # 컷별 생성에 남겨 두는 보수적인 예약치입니다.
 
 
@@ -32,6 +37,7 @@ class ComicRun:
     created_at: float
     panel_count: int
     specs: SceneSpecs | None = None
+    use_caption_prompt: bool = False
     tiles: list[str | None] = field(default_factory=lambda: [None] * 4)
     attempted: set[int] = field(default_factory=set)
     uncertain: dict[int, int] = field(default_factory=dict)
@@ -62,9 +68,10 @@ class ComicImages:
         panel_key = (key, index)
         shared_key = (key, None)
         failure_key = shared_key
-        deadline = time.monotonic() + 180
-        if not self.lock.acquire(timeout=180):
-            raise ProviderError('만화 생성 대기 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.', reason='timeout')
+        stage = 'scene_plan'
+        deadline = time.monotonic() + COMIC_PANEL_SECONDS
+        if not self.lock.acquire(timeout=COMIC_LOCK_SECONDS):
+            raise ProviderError('만화 생성 대기 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.', reason='image_not_started')
         try:
             now = time.monotonic()
             for old in list(self.failures):
@@ -81,10 +88,11 @@ class ComicImages:
             for cached_key in (shared_key, panel_key):
                 if cached_key in self.failures:
                     failure_key = cached_key
-                    _, message, reason, status, provider = self.failures[cached_key]
+                    _, message, reason, status, provider, stage = self.failures[cached_key]
                     raise ProviderError(message, reason=reason, status_code=status, provider=provider)
 
             if cached is not None and index in cached.uncertain:
+                stage = 'image'
                 failure_key = panel_key
                 raise ProviderError('이 컷의 이전 생성 결과를 확인하지 못했습니다.',
                                     reason='image_result_unknown', status_code=cached.uncertain[index])
@@ -94,23 +102,37 @@ class ComicImages:
                     self.cache.popitem(last=False)
                 cached = self.cache[key] = ComicRun(time.monotonic(), panel_count)
             self.cache.move_to_end(key)
-            if cached.specs is None:
-                cached.specs = self._plan_scenes(captions, deadline, cached)
+            if cached.specs is None and not cached.use_caption_prompt:
+                try:
+                    cached.specs = self._plan_scenes(captions, deadline, cached)
+                except ProviderError as error:
+                    # These failures happened before any image request. Use the approved
+                    # caption for a simple render; account and safety errors still propagate.
+                    if error.reason not in {'response_schema_invalid', 'timeout'} and error.status_code != 504:
+                        raise
+                    cached.use_caption_prompt = True
+                    logging.getLogger(__name__).warning('comic stage=scene_plan outcome=caption_fallback')
 
             failure_key = panel_key
-            tiles, specs = cached.tiles, cached.specs
+            stage = 'image_prepare'
+            tiles = cached.tiles
             if index in cached.attempted:
                 raise ProviderError('이 컷의 이전 요청 상태를 확인해 주세요.')
+            if cached.use_caption_prompt:
+                from providers import cloudflare_prompt
+                prompt = cloudflare_prompt({'format': 'comic4', 'selected_text': captions[index]})
+            else:
+                prompt = scene_prompt(cached.specs.scenes[index])
+            if time.monotonic() >= deadline:
+                raise ProviderError('이미지 요청 전에 만화 생성 시간이 초과되었습니다.', reason='image_not_started')
             cached.reserve(PANEL_NEURON_RESERVE, preserve_first_pass=False)
             cached.attempted.add(index)
             cached.created_at = time.monotonic()
-            prompt = scene_prompt(specs.scenes[index])
-            data = self.router._cloudflare_image(prompt, deadline=deadline)
-            if time.monotonic() >= deadline:
-                raise ProviderError('만화 생성 시간이 초과되었습니다.', reason='timeout')
+            stage = 'image'
+            data = self.router._cloudflare_image(prompt, deadline=deadline, steps=COMIC_IMAGE_STEPS)
             # Local cleanup only. An OCR problem must not discard an already generated panel.
             try:
-                tiles[index] = remove_lettering(data)
+                tiles[index] = (remove_lettering(data) if deadline - time.monotonic() >= 8 else data)
             except ProviderError:
                 logging.getLogger(__name__).warning('comic text_cleanup=unavailable panel=%d', index)
                 tiles[index] = data
@@ -124,6 +146,11 @@ class ComicImages:
                 self.cache.popitem(last=False)
             return tiles[index]
         except ProviderError as error:
+            reason, status, provider = failure_details(error)
+            logging.getLogger(__name__).warning(
+                'comic stage=%s panel=%d reason=%s provider=%s status=%s',
+                stage, index + 1, reason, provider, status,
+            )
             if failure_key == panel_key and cached is not None and index in cached.attempted:
                 if error.reason in {'timeout', 'image_result_unknown'} or error.status_code == 504:
                     cached.uncertain[index] = error.status_code or (504 if error.reason == 'timeout' else 502)
@@ -134,14 +161,14 @@ class ComicImages:
                 if len(self.failures) >= 20:
                     self.failures.popitem(last=False)
                 self.failures[failure_key] = (time.monotonic(), str(error), error.reason,
-                                              error.status_code, error.provider)
-            raise
+                                              error.status_code, error.provider, stage)
+            raise error from None
         finally:
             self.lock.release()
 
     def _plan_scenes(self, captions, deadline, run):
         # 계획 재작성에만 추가 호출을 허용합니다. 두 번 모두 같은 총 시간 예산을 사용합니다.
-        plan_deadline = min(deadline, time.monotonic() + 55)
+        plan_deadline = min(deadline, time.monotonic() + COMIC_PLAN_SECONDS)
         run.reserve(PLAN_NEURON_RESERVE, preserve_first_pass=True)
         try:
             return self.router._cloudflare_scene_specs(captions, deadline=plan_deadline)

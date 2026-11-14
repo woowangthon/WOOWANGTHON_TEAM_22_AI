@@ -402,3 +402,67 @@ def test_text_cleanup_preserves_panel_if_local_ocr_fails(monkeypatch):
     monkeypatch.setattr('comic_images.remove_lettering', unavailable)
     images = ComicImages(Router())
     assert images.panel(['장면'] * 4, 0) == board()
+
+
+def test_malformed_shared_plan_falls_back_to_each_original_caption(monkeypatch):
+    monkeypatch.setattr('comic_images.remove_lettering', lambda data: data)
+
+    class Router(FakeSceneRouter):
+        plans = 0
+        prompts = []
+
+        def _cloudflare_scene_specs(self, *args, **kwargs):
+            self.plans += 1
+            raise ProviderError('invalid scene JSON', reason='response_schema_invalid')
+
+        def _cloudflare_image(self, prompt, **kwargs):
+            self.prompts.append(prompt)
+            if '첫 장면' in prompt:
+                raise ProviderError('safety filter', reason='response_filtered', status_code=400)
+            return board()
+
+    captions = ['첫 장면', '둘째 장면', '셋째 장면', '넷째 장면']
+    router = Router()
+    images = ComicImages(router)
+    with pytest.raises(ProviderError, match='safety filter'):
+        images.panel(captions, 0)
+    for index in (1, 2, 3):
+        assert images.panel(captions, index) == board()
+    assert images.panel(captions, 1) == board()
+    assert router.plans == 2
+    assert len(router.prompts) == 4
+    for caption, prompt in zip(captions, router.prompts):
+        assert all((other in prompt) == (other == caption) for other in captions)
+
+
+def test_scene_timeout_uses_direct_caption_with_short_image_budget(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr('comic_images.time.monotonic', lambda: clock[0])
+    monkeypatch.setattr('comic_images.remove_lettering', lambda data: data)
+
+    class Router(FakeSceneRouter):
+        def _cloudflare_scene_specs(self, captions, *, deadline):
+            assert deadline == 120.0
+            clock[0] = deadline
+            raise ProviderError('scene timeout', reason='timeout', status_code=504)
+
+        def _cloudflare_image(self, prompt, *, deadline, steps):
+            assert '첫 장면' in prompt and '둘째 장면' not in prompt
+            assert deadline == 200.0
+            assert steps == 4
+            return board()
+
+    assert ComicImages(Router()).panel(['첫 장면', '둘째 장면', '셋째 장면', '넷째 장면'], 0) == board()
+
+
+def test_valid_image_is_returned_when_generation_uses_entire_budget(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr('comic_images.time.monotonic', lambda: clock[0])
+    monkeypatch.setattr('comic_images.remove_lettering', lambda _: pytest.fail('no time for OCR'))
+
+    class Router(FakeSceneRouter):
+        def _cloudflare_image(self, prompt, *, deadline, steps):
+            clock[0] = deadline + 1
+            return board()
+
+    assert ComicImages(Router()).panel(['장면'] * 4, 0) == board()

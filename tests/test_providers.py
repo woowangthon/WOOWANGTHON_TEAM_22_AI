@@ -131,7 +131,7 @@ def test_cloudflare_plan_and_images_never_call_groq_or_openai(router,monkeypatch
                              'action':'The narrator stacks blocks.','mode':'actual'}
                             for i,caption in enumerate(captions)]}
             return httpx.Response(200,json={'success':True,'result':completion(specs)})
-        assert len(body['prompt'])<=2048 and body['steps']==8
+        assert len(body['prompt'])<=2048 and body['steps']==(4 if kind=='comic4' else 8)
         if kind=='storybook':assert json.loads(body['prompt'].split('\n',1)[1])['selected_text']
         else:assert 'Main visible objects: blocks' in body['prompt']
         calls.append(body['prompt'])
