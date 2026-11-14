@@ -17,7 +17,7 @@ class Adapter:
         self.calls.append((payload, schema, timeout))
         if self.error:
             raise self.error
-        return schema(action=self.action)
+        return schema(action=self.action, message='친구와 다툰 일이 있었구나. 어떤 일이 있었는지 들려줄래?')
 
 
 @pytest.mark.parametrize(('messages', 'status'), [
@@ -104,3 +104,39 @@ def test_render_factory_serves_worry_contract_without_external_model(monkeypatch
         for response in (too_many, too_long):
             assert response.status_code == 422
             assert response.json() == {'error': '메시지 형식과 글자 수를 확인해 주세요.'}
+
+
+def test_contextual_response_is_used_without_closing(monkeypatch):
+    monkeypatch.setenv('WORRY_ENABLE_MODEL', '1')
+    class ContextAdapter:
+        def parse(self, instruction, payload, schema, *, timeout):
+            assert '알아서' in payload['conversation'][-1]['text']
+            return schema(action='listen', message='친구들이 맡은 일은 스스로 해 줬으면 하는구나. 어떤 걸 너에게 물어봤어?')
+    with TestClient(create_app(DiaryEngine(ContextAdapter()))) as client:
+        response = client.post('/api/worry/chat', json={'messages': [
+            {'role': 'child', 'text': '조별 과제를 하는데 친구들이 자기 일을 나에게 물어봐. 알아서 해줬으면 좋겠어.'},
+        ]})
+    assert response.json()['status'] == 'reply'
+    assert '스스로' in response.json()['message']
+
+
+@pytest.mark.parametrize('message', ['', '   ', '어땠어? 왜?'])
+def test_invalid_model_message_is_rejected(message):
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        WorryAction(action='listen', message=message)
+
+
+def test_bad_model_response_is_unavailable_without_retry(monkeypatch):
+    monkeypatch.setenv('WORRY_ENABLE_MODEL', '1')
+    class InvalidAdapter(Adapter):
+        def parse(self, *args, **kwargs):
+            self.calls.append(1)
+            return WorryAction(action='listen', message=' ')
+    adapter = InvalidAdapter()
+    with TestClient(create_app(DiaryEngine(adapter))) as client:
+        response = client.post('/api/worry/chat', json={'messages': [
+            {'role': 'child', 'text': '친구랑 싸웠어'},
+        ]})
+    assert response.json()['status'] == 'unavailable'
+    assert len(adapter.calls) == 1
