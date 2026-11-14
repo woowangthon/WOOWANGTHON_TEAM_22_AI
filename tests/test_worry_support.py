@@ -159,3 +159,24 @@ def test_mock_worry_demo_moves_from_listening_to_choices():
 
     assert '한마디로 말하거나' in answer['message']
     assert '어떤 방법이 더 편할 것 같아?' in answer['message']
+
+
+@pytest.mark.parametrize('reason,status_code', [
+    ('rate_limit', 429),
+    ('timeout', None),
+    ('response_truncated', None),
+])
+def test_unavailable_logs_only_safe_diagnostics(monkeypatch, caplog, reason, status_code):
+    monkeypatch.setenv('WORRY_ENABLE_MODEL', '1')
+    adapter = Adapter(error=ProviderError(
+        'private-provider-detail', reason=reason, status_code=status_code, provider='groq',
+    ))
+    with TestClient(create_app(DiaryEngine(adapter))) as client:
+        response = client.post('/api/worry/chat', json={'messages': [
+            {'role': 'child', 'text': 'private-child-message'},
+        ]})
+    assert response.json()['status'] == 'unavailable'
+    assert len(adapter.calls) == 1
+    assert f'reason={reason} provider=groq status={status_code}' in caplog.text
+    for private in ('private-provider-detail', 'private-child-message'):
+        assert private not in caplog.text + response.text
