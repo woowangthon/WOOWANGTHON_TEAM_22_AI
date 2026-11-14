@@ -14,11 +14,6 @@ from engine import ProviderError
 from providers import ProviderRouter
 
 
-@pytest.fixture(autouse=True)
-def fake_ocr(monkeypatch):
-    monkeypatch.setattr('comic_images.has_lettering',lambda data:False)
-    monkeypatch.setattr('comic_images.remove_lettering',lambda data:data)
-
 class FakeSceneRouter:
     def _cloudflare_review_scene(self,*args,**kw):return []
     def _cloudflare_scene_specs(self,captions,**kw):
@@ -166,28 +161,23 @@ def test_account_quota_failure_is_not_repeated_for_each_panel():
     assert all('scene' not in digest and index is None for digest, index in images.failures)
 
 
-def test_lettering_rejection_does_not_repeat_generation(monkeypatch):
-    monkeypatch.setattr('comic_images.has_lettering',lambda data:True)
+def test_generated_panels_are_returned_without_visual_review():
     class Router(FakeSceneRouter):
-        count=0
-        def _cloudflare_translate(self,text,**kw):return text
-        def _cloudflare_image(self,*args,**kw):self.count+=1;return board()
-    router=Router();images=ComicImages(router)
-    assert [images.panel(['scene']*4,i) for i in range(4)]==[None]*4
-    assert router.count==4
+        calls = 0
 
+        def _cloudflare_image(self, *args, **kwargs):
+            self.calls += 1
+            return board()
 
-def test_cleaned_lettering_keeps_the_first_image_request(monkeypatch):
-    checks=iter([True,False])
-    cleaned = board() + 'cleaned'
-    monkeypatch.setattr('comic_images.remove_lettering', lambda data: cleaned)
-    monkeypatch.setattr('comic_images.has_lettering',lambda data:next(checks))
-    class Router(FakeSceneRouter):
-        count=0
-        def _cloudflare_translate(self,text,**kw):return text
-        def _cloudflare_image(self,*args,**kw):self.count+=1;return board()
-    router=Router();assert ComicImages(router).panel(['scene']*4,0) == cleaned
-    assert router.count==1
+        def _cloudflare_review_scene(self, *args, **kwargs):
+            pytest.fail('Generated comic panels should skip visual review')
+
+    router = Router()
+    images = ComicImages(router)
+    captions = ['장면'] * 4
+    assert [images.panel(captions, index) for index in range(4)] == [board()] * 4
+    assert images.panel(captions, 0) == board()
+    assert router.calls == 4
 
 
 def test_ocr_failure_is_not_passed(monkeypatch):
@@ -362,36 +352,17 @@ def test_invalid_scene_plan_repairs_before_any_image_request():
     assert router.images == 1
 
 
-def test_neuron_budget_prioritizes_first_pass_and_blocks_excess_retries(monkeypatch):
-    clock = [100.0]
-    monkeypatch.setattr('comic_images.time.monotonic', lambda: clock[0])
+def test_plan_budget_preserves_all_four_first_image_calls():
+    from comic_images import ComicRun
 
-    class Router(FakeSceneRouter):
-        calls = 0
-
-        def _cloudflare_image(self, *args, **kwargs):
-            self.calls += 1
-            return board()
-
-        def _cloudflare_review_scene(self, *args, **kwargs):
-            return ['action']
-
-    router = Router()
-    images = ComicImages(router)
-    captions = ['장면'] * 4
-    assert images.panel(captions, 0) is None
-    clock[0] += 16
-    assert images.panel(captions, 0) is None
-    assert router.calls == 1
-    for index in range(1, 4):
-        assert images.panel(captions, index) is None
-    clock[0] += 16
-    assert images.panel(captions, 0) is None
-    assert images.panel(captions, 1) is None
+    run = ComicRun(created_at=100.0, panel_count=4)
+    run.reserve(600, preserve_first_pass=True)
+    run.reserve(600, preserve_first_pass=True)
     with pytest.raises(ProviderError, match='생성 예산'):
-        images.panel(captions, 2)
-    assert router.calls == 6
-    assert next(iter(images.cache.values())).reserved_neurons == 2400
+        run.reserve(600, preserve_first_pass=True)
+    for _ in range(4):
+        run.reserve(300, preserve_first_pass=False)
+    assert run.reserved_neurons == 2400
 
 
 def test_unknown_panel_stays_blocked_after_short_failure_cache_expires(monkeypatch):

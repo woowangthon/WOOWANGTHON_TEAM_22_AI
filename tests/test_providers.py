@@ -116,19 +116,14 @@ def test_cloudflare_plan_and_images_never_call_groq_or_openai(router,monkeypatch
         raise AssertionError('Cloudflare generation must not call a text or vision model')
     monkeypatch.setattr(router,'parse',forbidden)
     monkeypatch.setattr(router,'_review_image',forbidden)
-    monkeypatch.setattr('comic_images.has_lettering', lambda data:False)
     calls=[]
     original_client=httpx.Client
     def handler(request):
         assert request.url.host=='api.cloudflare.com'
         assert request.headers['authorization']=='Bearer cf-test'
         body=json.loads(request.read())
-        if 'messages' in body and isinstance(body['messages'][1]['content'],list):
-            review_text = body['messages'][1]['content'][0]['text']
-            evidence = json.loads(review_text.split(': ', 1)[1])
-            assert evidence['captions'][evidence['scene']['index']]
-            assert 'action_quote' not in evidence['scene'] and 'source_quote' not in evidence['scene']
-            return httpx.Response(200,json={'success':True,'result':completion({**{name:True for name in ('objects','action','appearance','grounding','lettering','composition','character')},'object_counts':[1]})})
+        if 'messages' in body and isinstance(body['messages'][1]['content'], list):
+            pytest.fail('Cloudflare comic must not call post-generation visual review')
         if 'messages' in body:
             captions=json.loads(body['messages'][1]['content'])['captions']
             specs={'scenes':[{'index':i,'objects':[{'name':'blocks','source_quote':caption}],

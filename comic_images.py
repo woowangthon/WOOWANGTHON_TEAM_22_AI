@@ -1,9 +1,8 @@
-"""Cloudflare 전용 장면별 생성. API 필드는 바꾸지 않고 네 장면의 사물·행동을 검증한 뒤 각 그림을 반환합니다."""
+"""Cloudflare 전용 장면별 생성. API 필드는 바꾸지 않고 원문에 근거한 장면 명세로 각 그림을 생성해 반환합니다."""
 import base64
 import hashlib
 import io
 import json
-import logging
 import re
 import threading
 import time
@@ -12,11 +11,8 @@ from dataclasses import dataclass, field
 
 from PIL import Image
 from engine import ProviderError
-from image_quality import has_lettering, remove_lettering
 from scene_prompting import SceneSpecs, scene_prompt
 
-
-logger = logging.getLogger(__name__)
 
 def visual_text(caption):
     """캡션은 원문 그대로 보존하고, 그림 입력에서만 직접 인용 대사를 제외합니다."""
@@ -26,7 +22,7 @@ def visual_text(caption):
 # Cloudflare 요금표를 바탕으로 한 계획용 예약치이며 실제 청구량과는 다릅니다.
 COMIC_NEURON_BUDGET = 2500
 PLAN_NEURON_RESERVE = 600
-PANEL_NEURON_RESERVE = 300  # FLUX 이미지와 시각 검토를 함께 예약합니다.
+PANEL_NEURON_RESERVE = 300  # 컷별 생성에 남겨 두는 보수적인 예약치입니다.
 
 
 @dataclass
@@ -36,7 +32,6 @@ class ComicRun:
     specs: SceneSpecs | None = None
     tiles: list[str | None] = field(default_factory=lambda: [None] * 4)
     attempted: set[int] = field(default_factory=set)
-    rejected_at: dict[int, float] = field(default_factory=dict)
     uncertain: dict[int, int] = field(default_factory=dict)
     reserved_neurons: int = 0
 
@@ -102,42 +97,16 @@ class ComicImages:
 
             failure_key = panel_key
             tiles, specs = cached.tiles, cached.specs
-            retrying = index in cached.attempted
-            if retrying:
-                rejected_at = cached.rejected_at.get(index)
-                if rejected_at is None:
-                    raise ProviderError('이 컷의 이전 요청 상태를 확인해 주세요.')
-                if len(cached.attempted) < panel_count or time.monotonic() - rejected_at < 15:
-                    return None
-            cached.reserve(PANEL_NEURON_RESERVE, preserve_first_pass=retrying)
+            if index in cached.attempted:
+                raise ProviderError('이 컷의 이전 요청 상태를 확인해 주세요.')
+            cached.reserve(PANEL_NEURON_RESERVE, preserve_first_pass=False)
             cached.attempted.add(index)
-            if not retrying:
-                cached.created_at = time.monotonic()
-            cached.rejected_at.pop(index, None)
-            scene = specs.scenes[index]
-            prompt = scene_prompt(scene)
-            reference = next((tile for tile in tiles if tile), None)
+            cached.created_at = time.monotonic()
+            prompt = scene_prompt(specs.scenes[index])
             data = self.router._cloudflare_image(prompt, deadline=deadline)
             if time.monotonic() >= deadline:
                 raise ProviderError('만화 생성 시간이 초과되었습니다.', reason='timeout')
-            lettering = has_lettering(data)
-            if lettering:
-                cleaned = remove_lettering(data)
-                if cleaned != data:
-                    data = cleaned
-                    lettering = has_lettering(data)
-            failures = (['lettering'] if lettering else
-                        self.router._cloudflare_review_scene(scene, data, captions,
-                            reference=reference, deadline=deadline))
-            if time.monotonic() >= deadline:
-                raise ProviderError('만화 품질 검사 시간이 초과되었습니다.', reason='timeout')
-            if failures:
-                # 기준명만 기록하고, 이 요청에서는 같은 컷을 다시 생성하지 않습니다.
-                logger.info('comic review_rejected panel=%d criteria=%s', index, ','.join(
-                    name for name in failures if name in {'objects','action','appearance','grounding','lettering','composition','character'}))
-                cached.rejected_at[index] = time.monotonic()
-            else:
-                tiles[index] = data
+            tiles[index] = data
 
             size = sum(len(tile or '') for tile in tiles)
             if size > self.max_bytes:
