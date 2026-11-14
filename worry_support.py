@@ -14,6 +14,8 @@ from engine import GenerationError
 from models import Message, StrictModel
 
 logger = logging.getLogger(__name__)
+WORRY_CONTEXT_MESSAGES = 9
+WORRY_CONTEXT_CHARS = 2600
 
 # 경청과 아동의 선택을 돕는 표현, 민감한 말에 대응하는 태도를 참고했습니다.
 # https://www.unicef.org/parenting/child-care/9-tips-for-better-communication
@@ -43,6 +45,13 @@ ADULT_RESPONSE = (
     '집에서 말하기 어렵다면 선생님이나 믿을 수 있는 다른 어른에게 말해도 돼.'
 )
 UNAVAILABLE = '지금은 연결 문제로 답을 전하기 어려워. 네 이야기가 잘못돼서 그런 건 아니야.'
+TEMPORARY_REPLY = (
+    '네 이야기를 들었어. 지금은 자세히 답하기 어려워서 잠깐 쉬었다 이어가도 좋아.'
+)
+RECOVERABLE_REASONS = frozenset({
+    'rate_limit', 'timeout', 'connection', 'provider_server_error',
+    'response_schema_invalid', 'response_truncated', 'response_incomplete', 'empty_response',
+})
 REPLIES = {
     'listen': '말해 줘서 고마워. 더 들려주고 싶은 이야기가 있어?',
     'feelings': '이야기해 줘서 고마워. 그때 어떤 기분이었어?',
@@ -94,6 +103,29 @@ class WorryResponse(StrictModel):
     mock: bool
 
 
+def recent_worry_context(conversation):
+    """Keep the newest child turn and as many complete preceding exchanges as fit."""
+    start = len(conversation) - 1
+    size = len(conversation[start]['text'])
+    if start and conversation[start - 1]['role'] == 'assistant':
+        question_size = len(conversation[start - 1]['text'])
+        if size + question_size <= WORRY_CONTEXT_CHARS:
+            start -= 1
+            size += question_size
+        else:
+            return conversation[start:]
+    while start and len(conversation) - start < WORRY_CONTEXT_MESSAGES:
+        previous = start - 1
+        if conversation[previous]['role'] == 'assistant' and previous:
+            previous -= 1
+        extra = sum(len(item['text']) for item in conversation[previous:start])
+        if size + extra > WORRY_CONTEXT_CHARS or len(conversation) - previous > WORRY_CONTEXT_MESSAGES:
+            break
+        start = previous
+        size += extra
+    return conversation[start:]
+
+
 def respond_to_worry(engine, messages):
     def reply(status, message):
         return WorryResponse(status=status, message=message, mock=engine.mock)
@@ -117,9 +149,13 @@ def respond_to_worry(engine, messages):
         logger.info('worry outcome=unavailable reason=model_disabled')
         return reply('unavailable', UNAVAILABLE)
     else:
+        context = recent_worry_context(conversation)
+        instruction = WORRY_PROMPT
+        if len(context) < len(conversation):
+            instruction += '입력은 최근 대화 일부다. 빠진 앞부분을 추측하지 않는다.'
         started = time.monotonic()
         try:
-            result = engine.adapter.parse(WORRY_PROMPT, {'conversation': conversation}, WorryAction, timeout=12)
+            result = engine.adapter.parse(instruction, {'conversation': context}, WorryAction, timeout=12)
             action = result.action
             if action == 'needs_adult':
                 return reply('needs_adult', ADULT_RESPONSE)
@@ -127,10 +163,12 @@ def respond_to_worry(engine, messages):
         except (GenerationError, OpenAIError, ValidationError) as error:
             reason, status, provider = failure_details(error)
             logger.warning(
-                'worry outcome=unavailable reason=%s provider=%s status=%s turns=%d chars=%d elapsed_ms=%d',
-                reason, provider, status, len(conversation),
-                sum(len(item['text']) for item in conversation), int((time.monotonic() - started) * 1000),
+                'worry outcome=unavailable reason=%s provider=%s status=%s messages=%d sent_messages=%d sent_chars=%d elapsed_ms=%d',
+                reason, provider, status, len(conversation), len(context),
+                sum(len(item['text']) for item in context), int((time.monotonic() - started) * 1000),
             )
+            if reason in RECOVERABLE_REASONS:
+                return reply('reply', TEMPORARY_REPLY)
             return reply('unavailable', UNAVAILABLE)
 
     if action == 'needs_adult':

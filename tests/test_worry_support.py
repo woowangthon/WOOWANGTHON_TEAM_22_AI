@@ -127,7 +127,7 @@ def test_invalid_model_message_is_rejected(message):
         WorryAction(action='listen', message=message)
 
 
-def test_bad_model_response_is_unavailable_without_retry(monkeypatch):
+def test_bad_model_response_keeps_conversation_open_without_retry(monkeypatch):
     monkeypatch.setenv('WORRY_ENABLE_MODEL', '1')
     class InvalidAdapter(Adapter):
         def parse(self, *args, **kwargs):
@@ -138,7 +138,7 @@ def test_bad_model_response_is_unavailable_without_retry(monkeypatch):
         response = client.post('/api/worry/chat', json={'messages': [
             {'role': 'child', 'text': '친구랑 싸웠어'},
         ]})
-    assert response.json()['status'] == 'unavailable'
+    assert response.json()['status'] == 'reply'
     assert len(adapter.calls) == 1
 
 
@@ -166,7 +166,7 @@ def test_mock_worry_demo_moves_from_listening_to_choices():
     ('timeout', None),
     ('response_truncated', None),
 ])
-def test_unavailable_logs_only_safe_diagnostics(monkeypatch, caplog, reason, status_code):
+def test_temporary_reply_logs_only_safe_diagnostics(monkeypatch, caplog, reason, status_code):
     monkeypatch.setenv('WORRY_ENABLE_MODEL', '1')
     adapter = Adapter(error=ProviderError(
         'private-provider-detail', reason=reason, status_code=status_code, provider='groq',
@@ -175,8 +175,47 @@ def test_unavailable_logs_only_safe_diagnostics(monkeypatch, caplog, reason, sta
         response = client.post('/api/worry/chat', json={'messages': [
             {'role': 'child', 'text': 'private-child-message'},
         ]})
-    assert response.json()['status'] == 'unavailable'
+    assert response.json()['status'] == 'reply'
     assert len(adapter.calls) == 1
     assert f'reason={reason} provider=groq status={status_code}' in caplog.text
     for private in ('private-provider-detail', 'private-child-message'):
         assert private not in caplog.text + response.text
+
+
+def test_long_worry_history_sends_bounded_context_and_preserves_short_answer(monkeypatch):
+    monkeypatch.setenv('WORRY_ENABLE_MODEL', '1')
+    adapter = Adapter()
+    messages = [
+        message
+        for index in range(10)
+        for message in (
+            {'role': 'child', 'text': f'친구 이야기 {index} ' * 30},
+            {'role': 'assistant', 'text': '그 일에 관해 더 들려줄래?'},
+        )
+    ]
+    messages += [
+        {'role': 'child', 'text': '서운했어.'},
+        {'role': 'assistant', 'text': '친구에게 해볼 말을 같이 찾아볼까?'},
+        {'role': 'child', 'text': '응.'},
+    ]
+    with TestClient(create_app(DiaryEngine(adapter))) as client:
+        result = client.post('/api/worry/chat', json={'messages': messages})
+    assert result.json()['status'] == 'reply'
+    [(payload, _, timeout)] = adapter.calls
+    context = payload['conversation']
+    assert context == messages[-len(context):]
+    assert context[-3:] == messages[-3:]
+    assert len(context) <= 9
+    assert sum(len(m['text']) for m in context) <= 2600
+    assert timeout == 12
+
+
+def test_risk_in_older_history_is_checked_before_context_reduction(monkeypatch):
+    monkeypatch.setenv('WORRY_ENABLE_MODEL', '1')
+    adapter = Adapter()
+    history = [{'role': 'child', 'text': '엄마가 나를 때렸어.'}]
+    history += [{'role': 'child', 'text': '친구랑 이야기했어.'}] * 14
+    with TestClient(create_app(DiaryEngine(adapter))) as client:
+        result = client.post('/api/worry/chat', json={'messages': history})
+    assert result.json()['status'] == 'needs_adult'
+    assert not adapter.calls

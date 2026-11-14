@@ -175,12 +175,16 @@ async function requestTurn(text = null) {
     });
     if (!response.ok) throw new Error('대화를 이어가지 못했어요. 다시 시도해 주세요.');
     const result = await response.json();
+    if (result.status === 'unavailable') {
+      status.textContent = result.message;
+      return;
+    }
     if (text !== null) {
       append('child', text);
       input.value = '';
     }
     append('assistant', result.message);
-    ended = ['finished', 'needs_adult', 'unavailable'].includes(result.status);
+    ended = ['finished', 'needs_adult'].includes(result.status);
     currentStatus = ended ? '대화를 마쳤어요.' :
       result.mock ? '체험 모드 · 외부 모델을 호출하지 않아요.' : '';
     status.textContent = currentStatus;
