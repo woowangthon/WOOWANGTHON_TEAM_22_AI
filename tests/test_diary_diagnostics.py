@@ -122,3 +122,30 @@ def test_untrusted_exception_metadata_is_never_logged_verbatim():
     assert failure_details(error) == ('unexpected_error', None, 'unknown')
     error.reason = ['not', 'hashable']
     assert failure_details(error) == ('unexpected_error', None, 'unknown')
+
+
+@pytest.mark.parametrize('path', ['/api/chat', '/api/diary'])
+def test_groq_rate_limit_keeps_error_contract_and_forwards_cooldown(monkeypatch, path):
+    import json
+
+    monkeypatch.setenv('GROQ_TEXT_MODEL', 'openai/gpt-oss-20b')
+    calls = []
+
+    def handler(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(429, headers={'Retry-After': '17'},
+                              json={'error': {'message': PRIVATE}})
+
+    router = install(monkeypatch, handler)
+    try:
+        with TestClient(create_app(DiaryEngine(router))) as client:
+            result = client.post(path, json=REQUEST)
+        assert result.status_code == 503
+        assert set(result.json()) == {'error'}
+        assert result.headers['Retry-After'] == '17'
+        assert PRIVATE not in result.text
+        assert len(calls) == 1
+        assert calls[0]['reasoning_effort'] == 'low'
+        assert calls[0]['response_format']['json_schema']['strict'] is True
+    finally:
+        router.groq.close()

@@ -90,7 +90,13 @@ def provider_failure(provider, error):
     else:
         message = '연결에 실패했습니다. 네트워크와 제공업체 상태를 확인해 주세요.'
     reason, safe_status, _ = failure_details(error)
-    return ProviderError(f'{provider}: {message}', reason=reason, status_code=safe_status, provider=provider)
+    failure = ProviderError(f'{provider}: {message}', reason=reason, status_code=safe_status, provider=provider)
+    if reason == 'rate_limit':
+        response = getattr(error, 'response', None)
+        retry_after = response.headers.get('retry-after', '') if response is not None else ''
+        if re.fullmatch(r'[0-9]{1,6}', retry_after):
+            failure.retry_after = retry_after
+    return failure
 
 
 class ProviderRouter:
@@ -150,13 +156,16 @@ class ProviderRouter:
                     raise ProviderError('AI 응답이 비어 있습니다. 다시 시도해 주세요.',
                                         reason='empty_response', provider=provider)
                 return response.output_parsed
+            model = setting('GROQ_TEXT_MODEL', 'openai/gpt-oss-20b')
+            # Keep structured output and review while spending fewer reasoning tokens.
+            options = {'reasoning_effort': 'low'} if model in {'openai/gpt-oss-20b', 'openai/gpt-oss-120b'} else {}
             response = client.chat.completions.create(
-                model=setting('GROQ_TEXT_MODEL', 'openai/gpt-oss-20b'),
+                model=model,
                 messages=[{'role': 'system', 'content': instruction},
                           {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}],
                 response_format={'type': 'json_schema', 'json_schema': {
                     'name': schema.__name__, 'strict': True, 'schema': schema.model_json_schema()}},
-                max_completion_tokens=completion_budget(schema))
+                max_completion_tokens=completion_budget(schema), **options)
             if not response.choices or response.choices[0].finish_reason != 'stop':
                 finish = response.choices[0].finish_reason if response.choices else None
                 reason = {'length': 'response_truncated', 'content_filter': 'response_filtered'}.get(

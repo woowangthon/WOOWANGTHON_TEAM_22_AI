@@ -44,7 +44,9 @@ def create_app(engine=None):
 
     @app.exception_handler(GenerationError)
     async def generation_error(request, error):
-        return JSONResponse(status_code=503, content={'error': str(error)})
+        retry_after = getattr(error, 'retry_after', None)
+        headers = {'Retry-After': retry_after} if retry_after is not None else None
+        return JSONResponse(status_code=503, content={'error': str(error)}, headers=headers)
 
     @app.exception_handler(OpenAIError)
     async def provider_error(request, error):

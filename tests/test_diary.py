@@ -146,3 +146,27 @@ def test_direct_diary_request_finishes_without_model():
     result = DiaryEngine(adapter).next_question(messages)
     assert result['finished'] is True
     assert not adapter.calls
+
+
+@pytest.mark.parametrize('question,accepted', [
+    ('어느 부분이 흔들렸어?', False),
+    ('넘어진 다음에 어떻게 됐어?', True),
+])
+def test_text_chat_uses_review_result_after_topic_switch(question, accepted):
+    messages = [
+        {'role': 'child', 'text': '아까 집에서 블록 탑이 흔들렸어.'},
+        {'role': 'assistant', 'text': '어떤 부분이 흔들렸어?'},
+        {'role': 'child', 'text': '그 이야기는 그만할래. 오늘 친구랑 놀이터에서 넘어졌어.'},
+    ]
+    adapter = FakeAdapter(QuestionCandidate(question=question, finished=False),
+                          Review(accepted=accepted))
+    with TestClient(create_app(DiaryEngine(adapter))) as client:
+        response = client.post('/api/chat', json={'messages': messages})
+
+    assert response.status_code == 200
+    expected = question if accepted else '더 말하고 싶으면 이어서 들려줘. 여기까지 적어도 괜찮아.'
+    assert response.json() == {
+        'question': expected, 'finished': False, 'mock': False, 'fallback': not accepted,
+    }
+    assert adapter.calls[1][0]['conversation'] == messages
+    assert adapter.calls[1][0]['candidate']['question'] == question
