@@ -13,7 +13,9 @@ _OCR_LOCK = threading.Lock()
 @lru_cache(maxsize=1)
 def _ocr_engine():
     from rapidocr import RapidOCR
-    return RapidOCR(params={'Global.log_level': 'error'})
+    return RapidOCR(params={'Global.log_level': 'error',
+                           'EngineConfig.onnxruntime.intra_op_num_threads': 1,
+                           'EngineConfig.onnxruntime.inter_op_num_threads': 1})
 
 
 def _recognize(data_url):
