@@ -72,17 +72,19 @@ def test_provider_restores_exact_original_captions_without_model_echo(monkeypatc
     assert [scene.action_quote for scene in plan.scenes] == CAPTIONS
 
 
-def test_original_caption_can_exceed_legacy_model_quote_limit():
+def test_deployed_scene_quote_limit_rejects_more_than_1000_characters():
     captions = [CAPTIONS[0] * 110, *CAPTIONS[1:]]
     value = candidate()
     value['scenes'][0]['source_quote'] = captions[0]
     value['scenes'][0]['action_quote'] = captions[0]
     assert len(captions[0]) > 1000
-    assert validate_specs(value, captions).scenes[0].source_quote == captions[0]
+    with pytest.raises(ProviderError):
+        validate_specs(value, captions)
 
 
-def test_short_complete_action_without_a_prop_is_valid():
+def test_deployed_action_validation_requires_four_words():
     value = candidate()
     value['scenes'][0]['action'] = 'The narrator rests.'
     value['scenes'][0]['objects'] = []
-    assert validate_specs(value, CAPTIONS).scenes[0].action == 'The narrator rests.'
+    with pytest.raises(ProviderError):
+        validate_specs(value, CAPTIONS)

@@ -8,8 +8,9 @@ from typing import Literal
 
 from openai import OpenAIError
 from pydantic import Field, ValidationError, model_validator
+from pydantic_core import PydanticCustomError
 
-from diagnostics import failure_details
+from diagnostics import failure_details, schema_failure_codes
 from engine import GenerationError
 from models import Message, StrictModel
 
@@ -46,7 +47,7 @@ ADULT_RESPONSE = (
 )
 UNAVAILABLE = '지금은 연결 문제로 답을 전하기 어려워. 네 이야기가 잘못돼서 그런 건 아니야.'
 TEMPORARY_REPLY = (
-    '네 이야기를 들었어. 지금은 자세히 답하기 어려워서 잠깐 쉬었다 이어가도 좋아.'
+    '지금은 답을 제대로 만들지 못했어. 네 이야기가 잘못돼서 그런 건 아니야. 잠깐 쉬었다 이어가도 좋아.'
 )
 RECOVERABLE_REASONS = frozenset({
     'rate_limit', 'timeout', 'connection', 'provider_server_error',
@@ -92,8 +93,10 @@ class WorryAction(StrictModel):
 
     @model_validator(mode='after')
     def validate_message(self):
-        if not self.message.strip() or self.message.count('?') + self.message.count('？') > 1:
-            raise ValueError('응답은 비어 있지 않고 질문은 최대 하나여야 합니다.')
+        if not self.message.strip():
+            raise PydanticCustomError('worry_message_blank', '응답은 비어 있지 않아야 합니다.')
+        if self.message.count('?') + self.message.count('？') > 1:
+            raise PydanticCustomError('worry_too_many_questions', '응답의 질문은 최대 하나여야 합니다.')
         return self
 
 
@@ -163,10 +166,12 @@ def respond_to_worry(engine, messages):
         except (GenerationError, OpenAIError, ValidationError) as error:
             reason, status, provider = failure_details(error)
             logger.warning(
-                'worry outcome=unavailable reason=%s provider=%s status=%s messages=%d sent_messages=%d sent_chars=%d elapsed_ms=%d',
+                'worry outcome=unavailable reason=%s provider=%s status=%s messages=%d sent_messages=%d sent_chars=%d elapsed_ms=%d schema_errors=%s',
                 reason, provider, status, len(conversation), len(context),
                 sum(len(item['text']) for item in context), int((time.monotonic() - started) * 1000),
+                schema_failure_codes(error),
             )
+            # reply keeps the session usable; outcome=unavailable above remains a model failure.
             if reason in RECOVERABLE_REASONS:
                 return reply('reply', TEMPORARY_REPLY)
             return reply('unavailable', UNAVAILABLE)

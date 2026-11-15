@@ -13,7 +13,9 @@ _OCR_LOCK = threading.Lock()
 @lru_cache(maxsize=1)
 def _ocr_engine():
     from rapidocr import RapidOCR
-    return RapidOCR(params={'Global.log_level': 'error'})
+    return RapidOCR(params={'Global.log_level': 'error',
+                           'EngineConfig.onnxruntime.intra_op_num_threads': 1,
+                           'EngineConfig.onnxruntime.inter_op_num_threads': 1})
 
 
 def _recognize(data_url):
@@ -56,8 +58,7 @@ def remove_lettering(data_url):
         pixels, result = _recognize(data_url)
         if result.txts is None:
             return data_url
-        if (result.boxes is None or result.scores is None
-                or not len(result.boxes) == len(result.txts) == len(result.scores)):
+        if result.boxes is None or result.scores is None:
             raise ValueError('incomplete OCR output')
         mask = np.zeros(pixels.shape[:2], dtype=np.uint8)
         for box, text, score in zip(result.boxes, result.txts, result.scores):

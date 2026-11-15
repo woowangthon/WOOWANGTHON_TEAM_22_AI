@@ -16,7 +16,7 @@ from openai import APIConnectionError, OpenAI, OpenAIError
 from pydantic import ValidationError
 
 from engine import ProviderError
-from diagnostics import failure_details
+from diagnostics import failure_details, schema_failure_codes
 from models import Review
 
 
@@ -185,9 +185,11 @@ class ProviderRouter:
             return schema.model_validate_json(content)
         except OpenAIError as error:
             raise provider_failure(provider, error) from None
-        except ValidationError:
-            raise ProviderError('AI 응답 형식을 확인하지 못했습니다. 다시 시도해 주세요.',
-                                reason='response_schema_invalid', provider=provider) from None
+        except ValidationError as error:
+            failure = ProviderError('AI 응답 형식을 확인하지 못했습니다. 다시 시도해 주세요.',
+                                    reason='response_schema_invalid', provider=provider)
+            failure.schema_errors = schema_failure_codes(error)
+            raise failure from None
 
     def transcribe(self, audio_bytes, extension, mime_type):
         provider = self.stt_provider
@@ -229,7 +231,7 @@ class ProviderRouter:
                                 reason='image_not_started' if image_generation else 'timeout',
                                 provider='cloudflare')
         try:
-            with HTTPClient(timeout=remaining, follow_redirects=False) as client:
+            with HTTPClient(timeout=remaining, follow_redirects=False, trust_env=False) as client:
                 response = client.post(f'https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}',
                                        headers={'Authorization': 'Bearer ' + token}, json=payload)
             try:
@@ -375,8 +377,8 @@ class ProviderRouter:
         from comic_images import ComicImages
         return ComicImages(self)
 
-    def generate_comic_panel(self, captions, index, *, panel_count=4):
-        return self.comic_images.panel(captions, index, panel_count=panel_count)
+    def generate_comic_panel(self, captions, index):
+        return self.comic_images.panel(captions, index)
 
     def _cloudflare_image(self, prompt, *, deadline=None, steps=8):
         model = setting('CLOUDFLARE_IMAGE_MODEL', '@cf/black-forest-labs/flux-1-schnell')

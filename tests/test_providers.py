@@ -244,7 +244,8 @@ def test_incomplete_vision_is_failed_not_rejected(router, monkeypatch, finish):
         with TestClient(create_app(DiaryEngine(router))) as client:
             result = client.post('/api/visual-story/image', json={
                 'diary_text': '블록을 쌓았다.', 'diary_hash': text_hash('블록을 쌓았다.'),
-                'source_ids': [0], 'format': 'comic4', 'confirmed': True}).json()
+                # 4컷은 검토 없이 컷을 보존하므로 실제 검토 경로인 그림책을 검사합니다.
+                'source_ids': [0], 'format': 'storybook', 'confirmed': True}).json()
         assert result['status'] == 'failed'
         assert result['imageUrl'] is None
         assert result['error']

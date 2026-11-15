@@ -176,10 +176,44 @@ def test_temporary_reply_logs_only_safe_diagnostics(monkeypatch, caplog, reason,
             {'role': 'child', 'text': 'private-child-message'},
         ]})
     assert response.json()['status'] == 'reply'
+    assert '답을 제대로 만들지 못했어' in response.json()['message']
     assert len(adapter.calls) == 1
     assert f'reason={reason} provider=groq status={status_code}' in caplog.text
     for private in ('private-provider-detail', 'private-child-message'):
         assert private not in caplog.text + response.text
+
+
+@pytest.mark.parametrize('data,code', [
+    ({'action': 'listen', 'message': ' '}, 'worry_message_blank:root'),
+    ({'action': 'listen', 'message': '왜? 어때?'}, 'worry_too_many_questions:root'),
+    ({'action': 'private-action', 'message': 'test'}, 'literal_error:action'),
+    ({'action': 'listen', 'message': 'test', 'private-key': 'private-value'}, 'extra_forbidden:other'),
+])
+def test_schema_failure_logs_fixed_codes_without_private_content(monkeypatch, caplog, data, code):
+    monkeypatch.setenv('WORRY_ENABLE_MODEL', '1')
+
+    class InvalidAdapter(Adapter):
+        def parse(self, *args, **kwargs):
+            self.calls.append(1)
+            return WorryAction.model_validate(data)
+
+    adapter = InvalidAdapter()
+    with TestClient(create_app(DiaryEngine(adapter))) as client:
+        response = client.post('/api/worry/chat', json={'messages': [
+            {'role': 'child', 'text': 'private-child'},
+        ]})
+    assert response.json()['status'] == 'reply'
+    assert len(adapter.calls) == 1
+    assert f'schema_errors={code}' in caplog.text
+    for private in ('private-action', 'private-key', 'private-value', 'private-child'):
+        assert private not in caplog.text + response.text
+
+
+def test_schema_failure_codes_reject_unknown_provider_labels():
+    from diagnostics import schema_failure_codes
+    error = ProviderError('private-provider-detail')
+    error.schema_errors = 'private-key:private-value'
+    assert schema_failure_codes(error) == 'none'
 
 
 def test_long_worry_history_sends_bounded_context_and_preserves_short_answer(monkeypatch):

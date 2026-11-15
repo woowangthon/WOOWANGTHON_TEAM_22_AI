@@ -62,6 +62,19 @@ class ComicImages:
         self.max_bytes = 32_000_000
 
     def panel(self, captions, index, *, panel_count=4):
+        deadline = time.monotonic() + COMIC_PANEL_SECONDS
+        data = self._panel(captions, index, panel_count=panel_count, deadline=deadline)
+        # Cache the generated original before OCR. Local cleanup must not hold the
+        # generation lock or cause another paid request, even on a cache hit.
+        if deadline - time.monotonic() < 8:
+            return data
+        try:
+            return remove_lettering(data)
+        except ProviderError:
+            logging.getLogger(__name__).warning('comic text_cleanup=unavailable panel=%d', index)
+            return data
+
+    def _panel(self, captions, index, *, panel_count, deadline):
         if len(captions) != 4 or not 0 <= index < panel_count <= 4:
             raise ProviderError('4컷 장면 구성을 다시 확인해 주세요.')
         key = hashlib.sha256(json.dumps([panel_count, captions], ensure_ascii=False).encode()).hexdigest()
@@ -69,7 +82,6 @@ class ComicImages:
         shared_key = (key, None)
         failure_key = shared_key
         stage = 'scene_plan'
-        deadline = time.monotonic() + COMIC_PANEL_SECONDS
         if not self.lock.acquire(timeout=COMIC_LOCK_SECONDS):
             raise ProviderError('만화 생성 대기 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.', reason='image_not_started')
         try:
@@ -130,12 +142,7 @@ class ComicImages:
             cached.created_at = time.monotonic()
             stage = 'image'
             data = self.router._cloudflare_image(prompt, deadline=deadline, steps=COMIC_IMAGE_STEPS)
-            # Local cleanup only. An OCR problem must not discard an already generated panel.
-            try:
-                tiles[index] = (remove_lettering(data) if deadline - time.monotonic() >= 8 else data)
-            except ProviderError:
-                logging.getLogger(__name__).warning('comic text_cleanup=unavailable panel=%d', index)
-                tiles[index] = data
+            tiles[index] = data
 
             size = sum(len(tile or '') for tile in tiles)
             if size > self.max_bytes:

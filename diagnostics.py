@@ -12,6 +12,30 @@ REASONS = frozenset({
 })
 
 
+SCHEMA_ERROR_TYPES = frozenset({
+    'json_invalid', 'model_type', 'missing', 'literal_error', 'string_type',
+    'string_too_short', 'string_too_long', 'extra_forbidden', 'value_error', 'other',
+    'worry_message_blank', 'worry_too_many_questions',
+})
+SCHEMA_ERROR_FIELDS = frozenset({'action', 'message', 'root', 'other'})
+SCHEMA_ERROR_CODES = frozenset(f'{kind}:{field}' for kind in SCHEMA_ERROR_TYPES for field in SCHEMA_ERROR_FIELDS)
+
+
+def schema_failure_codes(error):
+    """Fixed codes only; validation inputs, messages, contexts and unknown keys stay private."""
+    if isinstance(error, ValidationError):
+        codes = []
+        for item in error.errors(include_input=False, include_context=False, include_url=False):
+            kind = item['type'] if item['type'] in SCHEMA_ERROR_TYPES else 'other'
+            loc = item['loc']
+            field = 'root' if not loc else loc[0] if loc in (('action',), ('message',)) else 'other'
+            codes.append(f'{kind}:{field}')
+    else:
+        value = getattr(error, 'schema_errors', None)
+        codes = value.split(',') if isinstance(value, str) else []
+    return ','.join(sorted(set(codes) & SCHEMA_ERROR_CODES)[:4]) or 'none'
+
+
 def failure_details(error):
     """Allowlist categories/status only; unrecognized provider codes are never emitted."""
     status = getattr(error, 'status_code', None)
