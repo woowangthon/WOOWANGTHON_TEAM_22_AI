@@ -56,12 +56,10 @@ export function comicBubble(caption,childSources=[]){
 
 // 기존 JS 함수 호출부와의 호환용 래퍼입니다. 출처가 없으면 말풍선을 표시하지 않습니다.
 export const comicDialogue=(caption,childSources=[])=>comicBubble(caption,childSources)?.text||'';
-export function comicArtworkHTML(scene,childSources=[]){
+export function comicArtworkHTML(scene){
   if(!isImageDataURL(scene.imageUrl))return `<p class="note">${escapeHTML(scene.error||'그림이 아직 생성되지 않았습니다.')}</p>`;
-  const bubble=comicBubble(scene.caption,childSources);
-  return `<div class="comic-art">${bubble?`<p class="comic-dialogue comic-${bubble.kind}" aria-label="${bubble.kind==='thought'?'아이의 생각':'아이가 한 말'}">${escapeHTML(bubble.text)}</p>`:''}<img src="${scene.imageUrl}" alt="${escapeHTML(scene.caption)}"></div>`;
+  return `<div class="comic-art"><img src="${scene.imageUrl}" alt="${escapeHTML(scene.caption)}"></div>`;
 }
-export const COMIC_DIALOGUE_CSS='.comic-dialogue{position:relative;box-sizing:border-box;background:#fffef7;color:#493c32;border:2px solid #68513f;border-radius:18px;padding:10px 14px;margin:8px 8px 14px;font-size:15px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}.comic-thought{border-style:dashed;border-radius:28px}.comic-dialogue:after{content:"";position:absolute;bottom:-8px;left:24px;width:12px;height:12px;background:#fffef7;border-right:2px solid #68513f;border-bottom:2px solid #68513f;transform:rotate(45deg)}'+'.comic-thought:after{border:2px dotted #68513f;border-radius:50%;width:10px;height:10px;transform:none;bottom:-10px;left:24px}.comic-thought:before{content:"";position:absolute;width:5px;height:5px;border:1px solid #68513f;border-radius:50%;background:#fffef7;bottom:-18px;left:18px}';
 
 export class IllustratedDiary {
   constructor(request,onChange=()=>{}){this.request=request;this.onChange=onChange;this.state=null;this.busy=false;this.version=0;}
@@ -75,9 +73,14 @@ export class IllustratedDiary {
     }
   }
   clear(){this.cancel();this.state=null;this.onChange(null);}
+  hasUnknownResult(text,format){
+    return this.state?.diary_text===text&&this.state.format===format&&
+      this.state.scenes.some(scene=>scene.status==='unknown');
+  }
   async build(text,pages=2,format='storybook',options={}){
     if(this.busy)throw new Error('그림을 만들고 있어요. 잠시 기다려 주세요.');
     text=text.trim();
+    if(this.hasUnknownResult(text,format))throw new Error('이 만화의 이전 생성 결과를 먼저 확인해 주세요.');
     if(!text||text.length>6000)throw new Error('확인한 일기를 1~6,000자로 입력해 주세요.');
     if(!Number.isInteger(pages)||pages<1||pages>6)throw new Error('그림 수를 1~6장으로 선택해 주세요.');
     if(!['storybook','comic4'].includes(format))throw new Error('지원하지 않는 그림 형식입니다.');
@@ -121,7 +124,13 @@ export class IllustratedDiary {
         scene.error=result.error||(result.status==='rejected'?'이 컷이 그림 검사를 통과하지 못했어요. 다른 컷은 유지됩니다. 15초 뒤 이 컷만 다시 만들어 주세요.':
           result.status==='mock'?'체험 모드에서는 실제 그림을 만들지 않아요. 실제 AI 모드로 실행해 주세요.':'그림을 받지 못했어요. 키와 무료 한도를 확인해 주세요.');
       }
-    }catch(error){if(version===this.version){scene.status='failed';scene.error=error.message;scene.imageUrl=null;}}
+    }catch(error){
+      if(version===this.version){
+        scene.status=error.code==='IMAGE_RESULT_UNKNOWN'?'unknown':'failed';
+        scene.error=error.message;
+        scene.imageUrl=null;
+      }
+    }
     if(version===this.version){
       for(const repeated of state.scenes)if(repeated.reuse_scene_id===scene.scene_id)this.reuseScene(repeated);
       this.onChange(state);
@@ -133,11 +142,12 @@ export class IllustratedDiary {
       scene.status='failed';scene.imageUrl=null;scene.error='반복 컷의 근거가 일치하지 않습니다.';return;
     }
     scene.imageUrl=original.imageUrl;scene.status=original.status;
-    scene.error=original.error?'원본 컷을 다시 만들면 이 반복 컷도 함께 갱신됩니다.':null;
+    scene.error=original.status==='unknown'?original.error:
+      original.error?'원본 컷을 다시 만들면 이 반복 컷도 함께 갱신됩니다.':null;
   }
   async retry(index){
     if(this.busy)throw new Error('현재 그림 생성이 끝난 뒤 다시 시도해 주세요.');
-    const scene=this.state?.scenes[index];if(!scene||scene.status==='generated')return;
+    const scene=this.state?.scenes[index];if(!scene||['generated','unknown'].includes(scene.status))return;
     if(scene.repeated&&scene.reuse_scene_id){
       const original=this.state.scenes.findIndex(s=>s.scene_id===scene.reuse_scene_id);
       if(original<0)throw new Error('원본 컷을 찾지 못했습니다.');
@@ -151,9 +161,9 @@ export class IllustratedDiary {
     if(!this.state)throw new Error('먼저 그림일기를 만들어 주세요.');
     const {scenes,diary_text,created_at}=this.state;
     return `<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>그림일기</title>
-<style>${COMIC_DIALOGUE_CSS}body{font:18px/1.8 -apple-system,BlinkMacSystemFont,sans-serif;color:#273b30;background:#f4f5ef;margin:0}main{max-width:760px;margin:auto;padding:32px 20px}article{background:white;padding:24px;border:1px solid #d9e0d5;border-radius:14px;margin:24px 0;break-inside:avoid}img{display:block;width:100%;height:auto;border-radius:8px}p{white-space:pre-wrap;overflow-wrap:anywhere}.note{font-size:13px;color:#657364}@media print{body{background:white}article{break-after:page;border:0}summary{display:none}details>p{display:block}}</style>
+<style>body{font:18px/1.8 -apple-system,BlinkMacSystemFont,sans-serif;color:#273b30;background:#f4f5ef;margin:0}main{max-width:760px;margin:auto;padding:32px 20px}article{background:white;padding:24px;border:1px solid #d9e0d5;border-radius:14px;margin:24px 0;break-inside:avoid}img{display:block;width:100%;height:auto;border-radius:8px}p{white-space:pre-wrap;overflow-wrap:anywhere}.note{font-size:13px;color:#657364}@media print{body{background:white}article{break-after:page;border:0}summary{display:none}details>p{display:block}}</style>
 <main><h1>${this.state.format==='comic4'?'AI 4컷 만화':'그림일기'}</h1><p class="note">출력 생성 시각: ${escapeHTML(created_at)} · 기록한 사건의 날짜를 뜻하지 않습니다.</p>
-<div style="${this.state.format==='comic4'?'display:grid;grid-template-columns:1fr 1fr;gap:16px':''}">${scenes.map((scene,i)=>`<article><h2>${i+1}번째 장면</h2>${this.state.format==='comic4'?comicArtworkHTML(scene,this.state.childSources):isImageDataURL(scene.imageUrl)?`<img src="${scene.imageUrl}" alt="${escapeHTML(scene.caption)}">`:`<p class="note">${escapeHTML(scene.error||'그림이 아직 생성되지 않았습니다.')}</p>`}<p>${escapeHTML(scene.caption)}</p></article>`).join('')}</div>
+<div style="${this.state.format==='comic4'?'display:grid;grid-template-columns:1fr 1fr;gap:16px':''}">${scenes.map((scene,i)=>`<article><h2>${i+1}번째 장면</h2>${this.state.format==='comic4'?comicArtworkHTML(scene):isImageDataURL(scene.imageUrl)?`<img src="${scene.imageUrl}" alt="${escapeHTML(scene.caption)}">`:`<p class="note">${escapeHTML(scene.error||'그림이 아직 생성되지 않았습니다.')}</p>`}<p>${escapeHTML(scene.caption)}</p></article>`).join('')}</div>
 <details><summary>일기 글 보기</summary><p>${escapeHTML(diary_text)}</p></details><p class="note">확인한 일기를 바탕으로 만든 AI 삽화입니다. 원문과 다른 부분이 없는지 확인해 주세요.</p></main></html>`;
   }
 }

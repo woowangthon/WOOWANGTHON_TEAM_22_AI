@@ -14,4 +14,4 @@ def compact_payload(instruction, payload):
 
 def completion_budget(schema):
     # 추론 모델의 내부 토큰 여유도 남깁니다. 잘린 응답은 기존 오류 처리로 보냅니다.
-    return {'QuestionCandidate': 768, 'Review': 512, 'DiaryCandidate': 2048}.get(schema.__name__, 2048)
+    return {'QuestionCandidate': 768, 'Review': 512, 'DiaryCandidate': 2048, 'WorryAction': 512}.get(schema.__name__, 2048)

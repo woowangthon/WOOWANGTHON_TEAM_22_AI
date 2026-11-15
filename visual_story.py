@@ -86,7 +86,7 @@ class VisualStoryService:
         mode = 'mock' if self.engine.mock else 'deterministic'
         cloudflare_only = getattr(self.engine.adapter, 'image_provider', None) == 'cloudflare'
         if cloudflare_only:
-            notices.append('원문 순서로 장면을 구성합니다. Cloudflare 이미지는 원문 일치 여부를 직접 확인해 주세요. 만화는 로컬 문자 검사와 Cloudflare 보조 시각 검사를 거칩니다. 통과한 컷은 바로 표시하며 5분간 재사용합니다. 검사에서 제외된 컷은 15초 뒤 해당 컷만 다시 만들 수 있습니다. 자동 검사는 완벽하지 않아 최종 확인이 필요합니다.')
+            notices.append('원문 순서로 장면을 구성합니다. 생성된 만화 컷은 바로 표시되며 5분간 재사용합니다. 그림이 원문과 일치하는지 직접 확인해 주세요.')
         # Cloudflare 이미지 경로에서는 장면 계획에도 텍스트 모델을 호출하지 않습니다.
         if not self.engine.mock and not cloudflare_only and 1 < target < count:
             try:
@@ -158,10 +158,12 @@ class VisualStoryService:
                     and hasattr(adapter, 'generate_comic_panel') and index is not None):
                 captions = ['\n'.join(sources[sid]['text'] for sid in group) for group in groups]
                 captions.extend([captions[-1]] * (4 - len(captions)))
-                result['imageUrl'] = adapter.generate_comic_panel(captions, index)
+                result['imageUrl'] = adapter.generate_comic_panel(captions, index, panel_count=len(groups))
             else:
                 result['imageUrl'] = self._generate_image(text, caption, body.format)
             result['status'] = 'generated' if result['imageUrl'] else 'rejected'
+            if result['status'] == 'rejected':
+                result['error'] = '그림이 검사를 통과하지 못했어요. 일기 글은 그대로 남아 있어요.'
         except (GenerationError, OpenAIError, ValidationError, TimeoutError, httpx.TimeoutException) as error:
             reason, upstream_status, _ = failure_details(error)
             timeout = reason == 'timeout' or upstream_status == 504

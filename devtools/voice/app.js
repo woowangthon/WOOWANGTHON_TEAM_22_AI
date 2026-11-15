@@ -1,5 +1,5 @@
 import {Conversation,TurnDetector} from '/dev/voice/core.mjs';
-import {IllustratedDiary,isImageDataURL,comicBubble} from '/dev/voice/illustration.mjs';
+import {IllustratedDiary,isImageDataURL} from '/dev/voice/illustration.mjs';
 import {DrawingPad,drawingDiaryHTML} from '/dev/voice/drawing.mjs';
 
 const $=id=>document.getElementById(id);
@@ -24,8 +24,14 @@ async function request(path,body){
     else if(body!==undefined){options.body=JSON.stringify(body);options.headers={'Content-Type':'application/json'};}
     const response=await fetch(path,options);
     let data;try{data=await response.json();}catch{throw new Error('서버 응답을 읽지 못했습니다. 서버 실행 상태를 확인해 주세요.');}
-    if(!response.ok)throw new Error(typeof data.error==='string'?data.error:
-      typeof data.detail==='string'?data.detail:`요청에 실패했습니다 (${response.status}).`);
+    if(!response.ok){
+      const detail=data?.detail;
+      const error=new Error(typeof data?.error==='string'?data.error:
+        typeof detail==='string'?detail:typeof detail?.message==='string'?detail.message:
+          `요청에 실패했습니다 (${response.status}).`);
+      error.code=detail?.code;
+      throw error;
+    }
     return data;
   }catch(error){
     if(error.name==='AbortError')throw new Error('요청이 중지되었거나 시간이 초과되었습니다.');
@@ -60,7 +66,7 @@ function syncPictureControls(){
   $('draw-undo').disabled=busy||!drawingPad.history.past.length;
   $('draw-redo').disabled=busy||!drawingPad.history.future.length;
   $('draw-clear').disabled=busy||!drawingPad.history.strokes.length;
-  $('make-comic').disabled=busy||!composed;
+  $('make-comic').disabled=busy||!composed||illustrator.hasUnknownResult(composed.text,'comic4');
   const ready=Boolean(composed)&&!illustrator.busy;
   $('save-picture').disabled=!ready;$('print-picture').disabled=!ready;
 }
@@ -257,14 +263,12 @@ function renderPictures(state){
     const card=document.createElement('article');card.className='picture-page';
     const title=document.createElement('h3');title.textContent=`${index+1}컷${scene.repeated?' · 같은 장면':''}`;card.append(title);
     if(scene.status==='generated'&&isImageDataURL(scene.imageUrl)){
-      const line=comicBubble(scene.caption,state.childSources);
-      if(line){const bubble=document.createElement('p');bubble.className='comic-dialogue comic-'+line.kind;bubble.setAttribute('aria-label',line.kind==='thought'?'아이의 생각':'아이가 한 말');bubble.textContent=line.text;card.append(bubble);}
       const image=document.createElement('img');image.src=scene.imageUrl;image.alt=scene.caption;image.loading='lazy';card.append(image);
     }else{
       const placeholder=document.createElement('div');placeholder.className='picture-placeholder';
-      placeholder.textContent=scene.status==='generating'?'그림을 만들고 원문과 비교하고 있어요…':scene.status==='waiting'?'앞 장면이 끝나면 만들어요.':scene.error||'그림을 만들지 못했어요.';
+      placeholder.textContent=scene.status==='generating'?'그림을 만들고 있어요…':scene.status==='waiting'?'앞 장면이 끝나면 만들어요.':scene.error||'그림을 만들지 못했어요.';
       card.append(placeholder);
-      if(!illustrator.busy){
+      if(!illustrator.busy&&scene.status!=='unknown'){
         const retry=document.createElement('button');retry.textContent=scene.repeated?'원본 컷 다시 만들기':'이 컷만 다시 만들기';
         retry.onclick=()=>retryPicture(index);card.append(retry);
       }
@@ -294,7 +298,10 @@ async function makeComic(){
     const result=await illustrator.build(composed.text,4,'comic4',{childSources:conversation.messages.filter(message=>message.role==='child').map(message=>message.text)});
     if(version!==revision||!result)return;
     const generated=result.scenes.filter(scene=>scene.status==='generated').length;
-    setPhase('done',generated===4?'4컷 만화가 준비됐어요. 그림일기와 함께 확인해 주세요.':'내 그림일기는 그대로 있어요. 실패한 만화 컷만 다시 만들 수 있어요.');
+    const unknown=result.scenes.some(scene=>scene.status==='unknown');
+    setPhase('done',generated===4?'4컷 만화가 준비됐어요. 그림일기와 함께 확인해 주세요.':
+      unknown?'내 그림일기는 남아 있어요. 결과를 확인하지 못한 컷은 다시 요청하지 않았어요.':
+        '내 그림일기는 그대로 있어요. 실패한 만화 컷만 다시 만들 수 있어요.');
   }catch(error){if(version===revision){showError(error);setPhase('done','내 그림일기는 남아 있어요. 설정을 확인한 뒤 다시 시도해 주세요.');}}
 }
 function drawingChanged(){
