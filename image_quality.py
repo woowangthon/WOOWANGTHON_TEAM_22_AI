@@ -58,8 +58,7 @@ def remove_lettering(data_url):
         pixels, result = _recognize(data_url)
         if result.txts is None:
             return data_url
-        if (result.boxes is None or result.scores is None
-                or not len(result.boxes) == len(result.txts) == len(result.scores)):
+        if result.boxes is None or result.scores is None:
             raise ValueError('incomplete OCR output')
         mask = np.zeros(pixels.shape[:2], dtype=np.uint8)
         for box, text, score in zip(result.boxes, result.txts, result.scores):

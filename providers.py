@@ -231,7 +231,7 @@ class ProviderRouter:
                                 reason='image_not_started' if image_generation else 'timeout',
                                 provider='cloudflare')
         try:
-            with HTTPClient(timeout=remaining, follow_redirects=False) as client:
+            with HTTPClient(timeout=remaining, follow_redirects=False, trust_env=False) as client:
                 response = client.post(f'https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}',
                                        headers={'Authorization': 'Bearer ' + token}, json=payload)
             try:
@@ -377,8 +377,8 @@ class ProviderRouter:
         from comic_images import ComicImages
         return ComicImages(self)
 
-    def generate_comic_panel(self, captions, index, *, panel_count=4):
-        return self.comic_images.panel(captions, index, panel_count=panel_count)
+    def generate_comic_panel(self, captions, index):
+        return self.comic_images.panel(captions, index)
 
     def _cloudflare_image(self, prompt, *, deadline=None, steps=8):
         model = setting('CLOUDFLARE_IMAGE_MODEL', '@cf/black-forest-labs/flux-1-schnell')
